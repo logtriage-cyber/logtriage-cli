@@ -33,6 +33,7 @@ Security-relevant Event IDs supported:
 """
 from __future__ import annotations
 
+import ipaddress
 import logging
 import re
 from datetime import datetime, timezone
@@ -135,10 +136,25 @@ def _parse_timestamp(raw: str | None) -> datetime:
 
 
 def _clean_ip(raw: str | None) -> str | None:
-    """Return None for local/placeholder IP strings."""
-    if not raw or raw in ("-", "LOCAL", "127.0.0.1", "::1", "0.0.0.0"):
+    """Return a real IP address, or None for placeholders, loopback and host names.
+
+    Event 4776 has no IpAddress field and its "Workstation" fallback holds a
+    host name (e.g. BACKUPSERVER), which used to land in ip_address and poison
+    IP-based enrichment and grouping. Windows also writes IPv4 sources as
+    IPv4-mapped IPv6 ("::ffff:10.1.1.50"), which is unwrapped here.
+    """
+    if not raw:
         return None
-    return raw
+    value = raw.strip()
+    if value.lower().startswith("::ffff:"):
+        value = value[7:]
+    try:
+        addr = ipaddress.ip_address(value)
+    except ValueError:
+        return None  # "-", "LOCAL", or a host name
+    if addr.is_loopback or addr.is_unspecified:
+        return None
+    return str(addr)
 
 
 def _parse_event_element(event_el: ET.Element) -> LogEvent | None:

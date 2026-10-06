@@ -32,11 +32,13 @@ logger = logging.getLogger(__name__)
 # Matches the %ASA-severity-mnemonic: portion
 _MSG_ID_RE = re.compile(r"%(?:ASA|FTD|PIX)-(\d)-(\w+):\s*(.*)", re.DOTALL)
 
-# Syslog timestamp prefix patterns
+# Syslog timestamp prefix patterns. ASA's `logging timestamp` default puts the
+# year before the time ("Jan 15 2024 09:00:01"); relays often use the BSD form
+# without a year ("Jan 15 09:00:01") or append it ("Jan 15 09:00:01 2024").
 _SYSLOG_TS_RE = re.compile(
-    r"^(?:<\d+>)?"                              # optional PRI
-    r"(\w{3}\s+\d+\s+\d{2}:\d{2}:\d{2}(?:\s+\d{4})?)"  # timestamp
-    r"\s+\S+\s+"                                # hostname
+    r"^(?:<\d+>)?"                                                   # optional PRI
+    r"(\w{3}\s+\d+\s+(?:\d{4}\s+)?\d{2}:\d{2}:\d{2}(?:\s+\d{4})?)"   # timestamp
+    r"\s+\S+\s+"                                                     # hostname
 )
 
 # IP extraction helpers
@@ -56,19 +58,24 @@ _DENY_MNEMONICS = frozenset({
 
 
 def _parse_ts(raw: str | None) -> datetime:
+    """Parse an ASA syslog timestamp, keeping the year when the log has one.
+
+    Year-less timestamps get the current year prepended *before* parsing, so
+    Feb 29 parses in a leap year (strptime's default year 1900 is not one).
+    """
     if not raw:
         return datetime.now(timezone.utc)
-    for fmt in (
-        "%b %d %H:%M:%S %Y",
-        "%b %d %H:%M:%S",
-        "%b  %d %H:%M:%S",
-    ):
+    text = " ".join(raw.split())  # "Jan  5" -> "Jan 5"
+    for fmt in ("%b %d %Y %H:%M:%S", "%b %d %H:%M:%S %Y"):
         try:
-            dt = datetime.strptime(raw.strip(), fmt)
-            return dt.replace(year=datetime.now(timezone.utc).year, tzinfo=timezone.utc)
+            return datetime.strptime(text, fmt).replace(tzinfo=timezone.utc)
         except ValueError:
             continue
-    return datetime.now(timezone.utc)
+    try:
+        year = datetime.now(timezone.utc).year
+        return datetime.strptime(f"{year} {text}", "%Y %b %d %H:%M:%S").replace(tzinfo=timezone.utc)
+    except ValueError:
+        return datetime.now(timezone.utc)
 
 
 def _extract_src_ip(msg_body: str) -> str | None:
