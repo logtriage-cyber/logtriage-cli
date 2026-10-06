@@ -1,0 +1,14 @@
+<30>1 2024-03-15T08:00:01.000Z web-01 sshd 1234 - Accepted publickey for deploy from 10.10.1.5 port 43210 ssh2: RSA SHA256:abc123
+<30>1 2024-03-15T08:00:15.500Z web-01 sudo 5678 - deploy : TTY=pts/0 ; PWD=/var/www/app ; USER=root ; COMMAND=/usr/bin/systemctl restart nginx
+<30>1 2024-03-15T08:05:00.000Z web-01 sshd 1234 - Disconnected from user deploy 10.10.1.5 port 43210
+<86>1 2024-03-15T08:15:02.000Z db-01 postfix 2201 - connect from mail.example.com[10.20.0.5]
+<86>1 2024-03-15T08:15:02.500Z db-01 postfix 2201 - disconnect from mail.example.com[10.20.0.5]
+<30>1 2024-03-15T09:00:00.000Z app-01 cron 3301 - pam_unix(crond:session): session opened for user root by (uid=0)
+<30>1 2024-03-15T09:00:05.000Z app-01 cron 3301 - pam_unix(crond:session): session closed for user root
+<30>1 2024-03-15T10:30:00.000Z web-01 sshd 4411 - Accepted password for admin from 192.168.1.100 port 51234 ssh2
+<30>1 2024-03-15T10:30:10.000Z web-01 sudo 4412 - admin : TTY=pts/1 ; PWD=/home/admin ; USER=root ; COMMAND=/usr/bin/apt-get update
+<30>1 2024-03-15T10:45:00.000Z web-01 sshd 4411 - Disconnected from user admin 192.168.1.100 port 51234
+<46>1 2024-03-15T12:00:01.000Z monitor-01 ntpd 999 - ntpd: time set to 2024-03-15T12:00:01.000Z
+<30>1 2024-03-15T14:00:00.000Z app-01 sshd 5500 - Accepted publickey for jenkins from 10.10.2.10 port 60001 ssh2: ED25519 SHA256:xyz789
+<30>1 2024-03-15T14:00:30.000Z app-01 sudo 5501 - jenkins : TTY=pts/2 ; PWD=/var/lib/jenkins ; USER=root ; COMMAND=/usr/bin/docker-compose up -d
+<30>1 2024-03-15T14:05:00.000Z app-01 sshd 5500 - Disconnected from user jenkins 10.10.2.10 port 60001

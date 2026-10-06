@@ -1,0 +1,15 @@
+# Python build and test artefacts
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+
+# The test fixtures are sample logs. Keep them even where a parent
+# .gitignore ignores *.log.
+!tests/data/
+!tests/data/*

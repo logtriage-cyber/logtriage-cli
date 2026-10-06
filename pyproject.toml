@@ -1,0 +1,66 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "logtriage"
+dynamic = ["version"]
+description = "Parse and triage security logs locally: 50 formats (CloudTrail, Entra ID sign-ins, Windows events, firewalls, EDR, web servers) normalised to one schema."
+readme = "README.md"
+requires-python = ">=3.10"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+authors = [{ name = "LogTriage" }]
+keywords = [
+    "security",
+    "logs",
+    "log-parser",
+    "incident-response",
+    "dfir",
+    "siem",
+    "threat-hunting",
+    "cloudtrail",
+    "azure-ad",
+    "windows-event-log",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Information Technology",
+    "Intended Audience :: System Administrators",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Security",
+    "Topic :: System :: Logging",
+]
+dependencies = [
+    "pydantic>=2.5",
+    "defusedxml>=0.7",
+]
+
+[project.optional-dependencies]
+evtx = ["python-evtx>=0.8"]
+test = ["pytest>=7"]
+
+[project.scripts]
+logtriage = "logtriage.cli:main"
+
+[project.urls]
+Homepage = "https://logtriage.app"
+Documentation = "https://logtriage.app/reference/log-formats/"
+Repository = "https://github.com/logtriage-cyber/logtriage-cli"
+Issues = "https://github.com/logtriage-cyber/logtriage-cli/issues"
+
+[tool.setuptools.dynamic]
+version = { file = "VERSION" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

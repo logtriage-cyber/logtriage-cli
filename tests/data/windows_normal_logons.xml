@@ -1,0 +1,131 @@
+<Events>
+  <Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+    <System>
+      <Provider Name="Microsoft-Windows-Security-Auditing" Guid="{54849625-5478-4994-A5BA-3E3B0328C30D}" />
+      <EventID>4624</EventID>
+      <TimeCreated SystemTime="2024-03-20T07:58:01.123456789Z" />
+      <Computer>WKS-ALICE.contoso.com</Computer>
+      <Security UserID="S-1-5-18" />
+    </System>
+    <EventData>
+      <Data Name="SubjectUserName">ALICE$</Data>
+      <Data Name="SubjectDomainName">CONTOSO</Data>
+      <Data Name="TargetUserName">alice.johnson</Data>
+      <Data Name="TargetDomainName">CONTOSO</Data>
+      <Data Name="LogonType">2</Data>
+      <Data Name="IpAddress">10.1.1.50</Data>
+      <Data Name="WorkstationName">WKS-ALICE</Data>
+      <Data Name="AuthenticationPackageName">Kerberos</Data>
+      <Data Name="LogonProcessName">Kerberos</Data>
+    </EventData>
+  </Event>
+
+  <Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+    <System>
+      <Provider Name="Microsoft-Windows-Security-Auditing" Guid="{54849625-5478-4994-A5BA-3E3B0328C30D}" />
+      <EventID>4672</EventID>
+      <TimeCreated SystemTime="2024-03-20T07:58:01.234567890Z" />
+      <Computer>WKS-ALICE.contoso.com</Computer>
+      <Security UserID="S-1-5-18" />
+    </System>
+    <EventData>
+      <Data Name="SubjectUserName">alice.johnson</Data>
+      <Data Name="SubjectDomainName">CONTOSO</Data>
+      <Data Name="PrivilegeList">SeChangeNotifyPrivilege
+SeIncreaseWorkingSetPrivilege</Data>
+    </EventData>
+  </Event>
+
+  <Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+    <System>
+      <Provider Name="Microsoft-Windows-Security-Auditing" Guid="{54849625-5478-4994-A5BA-3E3B0328C30D}" />
+      <EventID>4624</EventID>
+      <TimeCreated SystemTime="2024-03-20T08:15:33.456789012Z" />
+      <Computer>WKS-BOB.contoso.com</Computer>
+      <Security UserID="S-1-5-18" />
+    </System>
+    <EventData>
+      <Data Name="SubjectUserName">BOB$</Data>
+      <Data Name="SubjectDomainName">CONTOSO</Data>
+      <Data Name="TargetUserName">bob.smith</Data>
+      <Data Name="TargetDomainName">CONTOSO</Data>
+      <Data Name="LogonType">2</Data>
+      <Data Name="IpAddress">10.1.1.75</Data>
+      <Data Name="WorkstationName">WKS-BOB</Data>
+      <Data Name="AuthenticationPackageName">Kerberos</Data>
+      <Data Name="LogonProcessName">Kerberos</Data>
+    </EventData>
+  </Event>
+
+  <Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+    <System>
+      <Provider Name="Microsoft-Windows-Security-Auditing" Guid="{54849625-5478-4994-A5BA-3E3B0328C30D}" />
+      <EventID>4688</EventID>
+      <TimeCreated SystemTime="2024-03-20T08:16:05.789012345Z" />
+      <Computer>WKS-BOB.contoso.com</Computer>
+      <Security UserID="S-1-5-21-000000003" />
+    </System>
+    <EventData>
+      <Data Name="SubjectUserName">bob.smith</Data>
+      <Data Name="SubjectDomainName">CONTOSO</Data>
+      <Data Name="NewProcessName">C:\Program Files\Microsoft Office\Office16\WINWORD.EXE</Data>
+      <Data Name="CommandLine">"C:\Program Files\Microsoft Office\Office16\WINWORD.EXE"</Data>
+      <Data Name="ParentProcessName">C:\Windows\explorer.exe</Data>
+    </EventData>
+  </Event>
+
+  <Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+    <System>
+      <Provider Name="Microsoft-Windows-Security-Auditing" Guid="{54849625-5478-4994-A5BA-3E3B0328C30D}" />
+      <EventID>4624</EventID>
+      <TimeCreated SystemTime="2024-03-20T09:02:14.012345678Z" />
+      <Computer>WKS-CAROL.contoso.com</Computer>
+      <Security UserID="S-1-5-18" />
+    </System>
+    <EventData>
+      <Data Name="SubjectUserName">CAROL$</Data>
+      <Data Name="SubjectDomainName">CONTOSO</Data>
+      <Data Name="TargetUserName">carol.white</Data>
+      <Data Name="TargetDomainName">CONTOSO</Data>
+      <Data Name="LogonType">2</Data>
+      <Data Name="IpAddress">10.1.2.22</Data>
+      <Data Name="WorkstationName">WKS-CAROL</Data>
+      <Data Name="AuthenticationPackageName">Kerberos</Data>
+      <Data Name="LogonProcessName">Kerberos</Data>
+    </EventData>
+  </Event>
+
+  <Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+    <System>
+      <Provider Name="Microsoft-Windows-Security-Auditing" Guid="{54849625-5478-4994-A5BA-3E3B0328C30D}" />
+      <EventID>4776</EventID>
+      <TimeCreated SystemTime="2024-03-20T09:45:00.123456789Z" />
+      <Computer>DC01.contoso.com</Computer>
+      <Security UserID="S-1-0-0" />
+    </System>
+    <EventData>
+      <Data Name="PackageName">MICROSOFT_AUTHENTICATION_PACKAGE_V1_0</Data>
+      <Data Name="TargetUserName">svc_backup</Data>
+      <Data Name="Workstation">BACKUPSERVER</Data>
+      <Data Name="Status">0x0</Data>
+    </EventData>
+  </Event>
+
+  <Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+    <System>
+      <Provider Name="Microsoft-Windows-Security-Auditing" Guid="{54849625-5478-4994-A5BA-3E3B0328C30D}" />
+      <EventID>4768</EventID>
+      <TimeCreated SystemTime="2024-03-20T10:00:01.456789012Z" />
+      <Computer>DC01.contoso.com</Computer>
+      <Security UserID="S-1-0-0" />
+    </System>
+    <EventData>
+      <Data Name="TargetUserName">david.jones</Data>
+      <Data Name="TargetDomainName">CONTOSO.COM</Data>
+      <Data Name="IpAddress">10.1.3.101</Data>
+      <Data Name="Status">0x0</Data>
+      <Data Name="TicketOptions">0x40810010</Data>
+      <Data Name="TicketEncryptionType">0x12</Data>
+    </EventData>
+  </Event>
+</Events>

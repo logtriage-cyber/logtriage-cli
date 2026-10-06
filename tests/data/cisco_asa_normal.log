@@ -1,0 +1,6 @@
+Jan 15 2024 09:00:01 asa-fw-01 : %ASA-6-302013: Built inbound TCP connection 12345 for outside:203.0.113.10/52100 (203.0.113.10/52100) to inside:10.0.0.50/443 (10.0.0.50/443)
+Jan 15 2024 09:00:10 asa-fw-01 : %ASA-6-302014: Teardown TCP connection 12345 for outside:203.0.113.10/52100 to inside:10.0.0.50/443 duration 0:00:05 bytes 4521 TCP FINs
+Jan 15 2024 09:05:00 asa-fw-01 : %ASA-6-302013: Built inbound TCP connection 12346 for outside:203.0.113.11/60000 (203.0.113.11/60000) to inside:10.0.0.100/80 (10.0.0.100/80)
+Jan 15 2024 09:10:00 asa-fw-01 : %ASA-5-713228: Group = VPN-Users, Username = alice, IP = 203.0.113.50, Connected. Duration = 0:30:00
+Jan 15 2024 09:15:00 asa-fw-01 : %ASA-7-609001: Built local-host outside:10.10.10.1
+Jan 15 2024 10:00:00 asa-fw-01 : %ASA-6-302015: Built inbound UDP connection 12347 for outside:203.0.113.12/56000 (203.0.113.12/56000) to inside:10.0.0.50/53 (10.0.0.50/53)

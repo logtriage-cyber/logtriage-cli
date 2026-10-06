@@ -1,0 +1,13 @@
+timestamp,ip_address,http_method,path,status_code,user_agent,user_principal_name
+2026-06-07T09:00:00Z,10.10.1.50,GET,/api/v1/dashboard,200,Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36,alice@corp.com
+2026-06-07T09:00:05Z,10.10.1.50,GET,/api/v1/users/me,200,Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36,alice@corp.com
+2026-06-07T09:00:30Z,10.10.1.51,POST,/api/v1/auth/login,200,Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7),bob@corp.com
+2026-06-07T09:01:00Z,10.10.1.51,GET,/api/v1/tasks,200,Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7),bob@corp.com
+2026-06-07T09:01:15Z,10.10.1.51,POST,/api/v1/tasks,201,Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7),bob@corp.com
+2026-06-07T09:02:00Z,10.10.1.52,GET,/api/v1/products,200,Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:123.0),carol@corp.com
+2026-06-07T09:02:10Z,10.10.1.52,GET,/api/v1/products/42,200,Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:123.0),carol@corp.com
+2026-06-07T09:05:00Z,10.10.1.50,PUT,/api/v1/users/profile,200,Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36,alice@corp.com
+2026-06-07T09:10:00Z,10.10.1.53,GET,/api/v1/reports,200,Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36,dave@corp.com
+2026-06-07T09:10:15Z,10.10.1.53,GET,/api/v1/reports/2026-05,200,Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36,dave@corp.com
+2026-06-07T09:15:00Z,10.10.0.1,GET,/health,200,kube-probe/1.28,
+2026-06-07T09:20:00Z,10.10.1.52,DELETE,/api/v1/tasks/55,204,Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:123.0),carol@corp.com

@@ -1,0 +1,20 @@
+Mar 15 08:00:01 web-01 sshd[1234]: Accepted publickey for deploy from 10.10.1.5 port 43210 ssh2: RSA SHA256:abc123
+Mar 15 08:00:02 web-01 sshd[1234]: pam_unix(sshd:session): session opened for user deploy by (uid=0)
+Mar 15 08:01:00 web-01 sudo[2001]: deploy : TTY=pts/0 ; PWD=/var/www/app ; USER=root ; COMMAND=/usr/bin/systemctl restart nginx
+Mar 15 08:01:05 web-01 sudo[2001]: pam_unix(sudo:session): session opened for user root by deploy(uid=1001)
+Mar 15 08:01:06 web-01 sudo[2001]: pam_unix(sudo:session): session closed for user root
+Mar 15 08:05:00 web-01 sshd[1234]: Disconnected from user deploy 10.10.1.5 port 43210
+Mar 15 09:00:00 web-01 CRON[3001]: pam_unix(crond:session): session opened for user root by (uid=0)
+Mar 15 09:00:01 web-01 CRON[3001]: CMD (/usr/local/bin/backup.sh)
+Mar 15 09:00:05 web-01 CRON[3001]: pam_unix(crond:session): session closed for user root
+Mar 15 10:30:00 web-01 sshd[4411]: Accepted password for admin from 192.168.1.100 port 51234 ssh2
+Mar 15 10:30:01 web-01 sshd[4411]: pam_unix(sshd:session): session opened for user admin by (uid=0)
+Mar 15 10:31:00 web-01 sudo[4412]: admin : TTY=pts/1 ; PWD=/home/admin ; USER=root ; COMMAND=/usr/bin/apt-get update
+Mar 15 10:32:00 web-01 sudo[4413]: admin : TTY=pts/1 ; PWD=/home/admin ; USER=root ; COMMAND=/usr/bin/apt-get upgrade -y
+Mar 15 10:45:00 web-01 sshd[4411]: Disconnected from user admin 192.168.1.100 port 51234
+Mar 15 14:00:00 web-01 sshd[5500]: Accepted publickey for jenkins from 10.10.2.10 port 60001 ssh2: ED25519 SHA256:xyz789
+Mar 15 14:00:01 web-01 sshd[5500]: pam_unix(sshd:session): session opened for user jenkins by (uid=0)
+Mar 15 14:00:30 web-01 sudo[5501]: jenkins : TTY=pts/2 ; PWD=/var/lib/jenkins ; USER=root ; COMMAND=/usr/bin/docker-compose up -d
+Mar 15 14:05:00 web-01 sshd[5500]: Disconnected from user jenkins 10.10.2.10 port 60001
+Mar 15 16:00:00 web-01 login[6001]: pam_unix(login:auth): authentication failure; logname= uid=0 euid=0 tty=/dev/tty1 ruser= rhost= user=badpass
+Mar 15 16:00:05 web-01 login[6001]: FAILED LOGIN 1 FROM /dev/tty1 FOR badpass, Authentication failure

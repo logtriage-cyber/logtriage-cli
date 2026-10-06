@@ -1,0 +1,14 @@
+#separator \x09
+#set_separator	,
+#empty_field	(empty)
+#unset_field	-
+#path	http
+#open	2024-01-15-09-00-00
+#fields	ts	uid	id.orig_h	id.orig_p	id.resp_h	id.resp_p	trans_depth	method	host	uri	referrer	version	user_agent	request_body_len	response_body_len	status_code	status_msg	info_code	info_msg	tags	username	password	proxied	orig_fuids	orig_filenames	orig_mime_types	resp_fuids	resp_filenames	resp_mime_types
+#types	time	string	addr	port	addr	port	count	string	string	string	string	string	string	count	count	count	string	count	string	set[enum]	string	string	set[string]	vector[string]	vector[string]	vector[string]	vector[string]	vector[string]	vector[string]
+1705312800.100000	CbCD23bcEFG	203.0.113.10	52100	10.0.0.50	80	1	GET	api.example.com	/api/v1/products	-	1.1	Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36	0	4096	200	OK	-	-	-	-	-	-	-	FbCD001	products.json	application/json	-	-	-
+1705312805.200000	CbCD23bcEFH	203.0.113.11	52101	10.0.0.50	80	1	GET	api.example.com	/api/v1/users/42	https://app.example.com/dashboard	1.1	Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)	0	512	200	OK	-	-	-	-	-	-	-	FbCD002	user.json	application/json	-	-	-
+1705312810.300000	CbCD23bcEFI	203.0.113.12	52102	10.0.0.50	80	1	POST	api.example.com	/api/v1/orders	https://app.example.com/checkout	1.1	Mozilla/5.0 (iPhone; CPU iPhone OS 17_0)	256	128	201	Created	-	-	-	-	-	-	-	-	-	-	-	-	-
+1705312815.400000	CbCD23bcEFJ	203.0.113.10	52103	10.0.0.50	80	1	GET	api.example.com	/api/v1/products?category=electronics&page=2	https://app.example.com/shop	1.1	Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36	0	8192	200	OK	-	-	-	-	-	-	-	FbCD003	products.json	application/json	-	-	-
+1705312820.500000	CbCD23bcEFK	203.0.113.13	52104	10.0.0.50	80	1	PUT	api.example.com	/api/v1/users/42/profile	https://app.example.com/settings	1.1	okhttp/4.12.0	512	256	200	OK	-	-	-	-	-	-	-	-	-	-	-	-	-
+#close	2024-01-15-09-05-00
