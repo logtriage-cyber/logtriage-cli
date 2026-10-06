@@ -1,30 +1,51 @@
 # Synced from the LogTriage service (https://logtriage.app). Edits made here are
 # overwritten on the next sync; see 'Contributing' in README.md.
 """
-Palo Alto Networks PAN-OS native CSV syslog parser.
+Palo Alto Networks PAN-OS syslog parser (comma-separated log records).
 
-PAN-OS writes comma-separated log records. The second field is always the log type:
-  TRAFFIC, THREAT, AUTH, HIPMATCH, URL, DATA, TUNNEL, USERID, DECRYPTION, etc.
+PAN-OS forwards each log entry as one comma-separated record, optionally behind a
+BSD/IETF syslog header (which has no commas, so it lands in the unused field 0).
+Field positions are fixed per log type, as documented by Palo Alto Networks in
+"Syslog Field Descriptions" (the pan-os/10-2 and pan-os/11-1 URLs redirect here):
 
-Field positions are fixed per log type (PAN-OS Log Reference):
-  Common fields 0-5: domain, receive_time, serial, type, subtype, time_generated
-  TRAFFIC fields:
-    6=src  7=dst  8=natsrc  9=natdst  10=rulename  11=srcuser  12=dstuser
-    13=srczn  14=dstzn  15=inbound_if  16=outbound_if  17=logfwdprofile  18=(pad)
-    19=sessionid  20=repeatcnt  21=sport  22=dport  23=natsport  24=natdport
-    25=flags  26=proto  27=action  28=bytes  29=bytes_sent  30=bytes_rcvd  …
-  THREAT fields:
-    6=src  7=dst  ...  11=srcuser  12=dstuser  ...  27=action  28=threat/content-name
-    29=category  30=severity  31=direction  …
-  AUTH fields:
-    6=srcip  7=user  8=normalize-user  9=object  10=authpolicy  11=repeatcnt  12=authid
-    13=vendor  14=logprofile  15=desc  16=clienttype  17=event  18=factorno
-    19=seqno  20=actionflags  21=vsys  22=vsys_name  …
+  https://docs.paloaltonetworks.com/ngfw/administration/monitoring/use-syslog-for-monitoring/syslog-field-descriptions/traffic-log-fields
+  https://docs.paloaltonetworks.com/ngfw/administration/monitoring/use-syslog-for-monitoring/syslog-field-descriptions/threat-log-fields
+  https://docs.paloaltonetworks.com/ngfw/administration/monitoring/use-syslog-for-monitoring/syslog-field-descriptions/authentication-log-fields
+
+0-based positions read here:
+  All types:   0 FUTURE_USE  1 Receive Time  2 Serial Number  3 Type
+               4 Threat/Content Type (subtype)  5 FUTURE_USE  6 Generated Time
+  TRAFFIC and THREAT (identical through Action):
+               7 Source Address  8 Destination Address  9 NAT Source IP  10 NAT Destination IP
+               11 Rule Name  12 Source User  13 Destination User  14 Application
+               15 Virtual System  16 Source Zone  17 Destination Zone  18 Inbound Interface
+               19 Outbound Interface  20 Log Action  21 FUTURE_USE  22 Session ID
+               23 Repeat Count  24 Source Port  25 Destination Port  26 NAT Source Port
+               27 NAT Destination Port  28 Flags  29 Protocol  30 Action
+  THREAT:      31 URL/Filename  32 Threat ID ("name(id)"; only "(9999)" on URL logs)
+               33 Category  34 Severity  35 Direction ... 69 Threat Category
+  AUTHENTICATION (documented Type "AUTHENTICATION"; real devices also write "AUTH"):
+               7 Virtual System  8 Source IP  9 User  10 Normalize User  11 Object
+               12 Authentication Policy  13 Repeat Count  14 Authentication ID  15 Vendor
+               16 Log Action  17 Server Profile  18 Description  19 Client Type
+               20 Event Type  21 Factor Number ...
+
+New releases append fields to the end of a record, so these leading positions are
+stable across versions; a short (older or truncated) record yields None for what is
+missing. Addresses are validated with ipaddress, so a record in an unexpected layout
+never puts a timestamp or a host name into ip_address. Times carry no UTC offset
+(firewall local time) and are read as UTC, as in the other parsers.
+
+status_code: TRAFFIC deny/drop/reset -> 403, drop ICMP -> 400; THREAT blocking
+actions -> 403, otherwise by severity (critical/high -> 401, medium -> 400);
+AUTHENTICATION failure -> 403, success -> 200. The documentation does not enumerate
+the Event Type values, so the outcome is matched by keyword ("fail", "deny",
+"reject" / "success"); anything else (e.g. "Authentication Timeout") gets no status.
 """
 from __future__ import annotations
 
 import csv
-import io
+import ipaddress
 import logging
 import re
 from datetime import datetime, timezone
@@ -34,14 +55,33 @@ from logtriage.models import LogEvent, LogFormat
 
 logger = logging.getLogger(__name__)
 
+# Positions shared by every log type
+_RECEIVE_TIME, _TYPE, _SUBTYPE, _GENERATED_TIME = 1, 3, 4, 6
+# TRAFFIC and THREAT
+_SRC, _DST, _SRC_USER, _APP, _DPORT, _PROTO, _ACTION = 7, 8, 12, 14, 25, 29, 30
+# THREAT
+_URL, _THREAT_ID, _CATEGORY, _SEVERITY, _THREAT_CATEGORY = 31, 32, 33, 34, 69
+# AUTHENTICATION
+_AUTH_SRC, _AUTH_USER, _AUTH_NORMALIZED_USER, _AUTH_DESCRIPTION, _AUTH_EVENT = 8, 9, 10, 18, 20
+
+# Type values from the "Syslog Field Descriptions" pages (URL, data-filtering and
+# WildFire logs are THREAT subtypes), plus spellings real devices also emit: AUTH and
+# HIPMATCH. URL, DATA and TUNNEL were accepted before and still are. Tunnel
+# inspection's START/END are too generic to use as a format discriminator.
+_AUTH_TYPES = frozenset({"AUTHENTICATION", "AUTH"})
+_PANOS_TYPES = frozenset({
+    "TRAFFIC", "THREAT", *_AUTH_TYPES, "SYSTEM", "CONFIG", "HIP-MATCH", "HIPMATCH",
+    "GLOBALPROTECT", "USERID", "IPTAG", "DECRYPTION", "CORRELATION", "SCTP", "GTP",
+    "URL", "DATA", "TUNNEL",
+})
+
 _TS_FMT = "%Y/%m/%d %H:%M:%S"
-
-
-def _parse_ts(raw: str) -> datetime:
-    try:
-        return datetime.strptime(raw.strip(), _TS_FMT).replace(tzinfo=timezone.utc)
-    except ValueError:
-        return datetime.now(timezone.utc)
+_TS_RE = re.compile(r"\d{4}/\d{2}/\d{2} \d{2}:\d{2}:\d{2}")
+_PROTO_RE = re.compile(r"[A-Za-z0-9-]{1,32}")
+_PORT_RE = re.compile(r"[0-9]{1,5}")
+_THREAT_ID_RE = re.compile(r"\(\d+\)$")  # trailing "(8002)" of "SCAN: Host Sweep(8002)"
+_UNSET_CATEGORIES = frozenset({"any", "unknown", "n/a"})
+_MAX_LABEL = 256  # width of the user_principal_name / resource_display_name columns
 
 
 def _g(row: list[str], idx: int) -> str | None:
@@ -52,93 +92,169 @@ def _g(row: list[str], idx: int) -> str | None:
         return None
 
 
+def _parse_ts(raw: str | None) -> datetime | None:
+    if not raw:
+        return None
+    try:
+        return datetime.strptime(raw, _TS_FMT).replace(tzinfo=timezone.utc)
+    except ValueError:
+        return None
+
+
+def _ip(raw: str | None) -> str | None:
+    """A real IP address, or None for anything else (empty, 0.0.0.0, a time, a host name)."""
+    if not raw:
+        return None
+    try:
+        addr = ipaddress.ip_address(raw.split("%", 1)[0])  # drop an IPv6 zone ("%eth0")
+    except ValueError:
+        return None
+    if addr.is_unspecified or addr.is_loopback:
+        return None
+    return str(addr)
+
+
+def _endpoint(ip: str | None, port: str | None) -> str | None:
+    if not ip:
+        return None
+    if not (port and _PORT_RE.fullmatch(port) and int(port) > 0):
+        return ip
+    return f"[{ip}]:{port}" if ":" in ip else f"{ip}:{port}"
+
+
+def _cap(value: str | None) -> str | None:
+    return value[:_MAX_LABEL] if value else None
+
+
+def _norm(value: str | None) -> str:
+    """Lower-case and hyphenate: TRAFFIC records spell actions 'reset both', 'drop ICMP'."""
+    return "-".join((value or "").lower().split())
+
+
+_DENY_ACTIONS = frozenset({"deny", "drop", "block", "reset-both", "reset-client", "reset-server"})
+
+
 def _action_status(action: str | None) -> int:
-    a = (action or "").lower()
-    if a in ("deny", "drop", "block", "reset-both", "reset-client", "reset-server"):
+    a = _norm(action)
+    if a in _DENY_ACTIONS:
         return 403
-    if a in ("drop-icmp",):
+    if a == "drop-icmp":
         return 400
     return 200
+
+
+# THREAT actions that stop the traffic: the documented values, plus "drop-packet",
+# which real records also use.
+_THREAT_BLOCK_ACTIONS = frozenset({
+    "deny", "drop", "drop-all-packets", "drop-packet", "reset-client", "reset-server",
+    "reset-both", "block", "block-url", "block-ip", "random-drop", "sinkhole",
+    "block-continue", "block-override", "override-lockout",
+})
 
 
 def _threat_status(severity: str | None, action: str | None) -> int:
-    s = (severity or "").lower()
-    a = (action or "").lower()
-    if a in ("block", "block-url", "block-ip", "drop", "reset-both"):
+    if _norm(action) in _THREAT_BLOCK_ACTIONS:
         return 403
+    s = _norm(severity)
     if s in ("critical", "high"):
         return 401
-    if s in ("medium",):
+    if s == "medium":
         return 400
     return 200
 
 
-def _row_to_log(row: list[str]) -> LogEvent | None:
-    if len(row) < 5:
-        return None
+def _auth_status(event: str | None) -> int | None:
+    e = (event or "").lower()
+    if any(word in e for word in ("fail", "deny", "denied", "reject")):
+        return 403
+    if "success" in e or "succeed" in e:
+        return 200
+    return None
 
-    log_type = _g(row, 3) or ""
-    ts = _parse_ts(_g(row, 1) or "")
 
-    if log_type.upper() == "TRAFFIC":
-        src = _g(row, 6)
-        user = _g(row, 11)
-        proto = _g(row, 26)
-        action = _g(row, 27)
-        dport = _g(row, 22)
-        dst = _g(row, 7)
-        path = f"{dst}:{dport}" if dst and dport else dst
-        return LogEvent(
-            source_format=LogFormat.PANOS,
-            timestamp=ts,
-            ip_address=src,
-            user_principal_name=user,
-            http_method=(proto or "").upper() or None,
-            path=path,
-            status_code=_action_status(action),
-            resource_display_name="PAN-OS/TRAFFIC",
-        )
-
-    if log_type.upper() == "THREAT":
-        src = _g(row, 6)
-        user = _g(row, 11)
-        action = _g(row, 27)
-        threat_name = _g(row, 28)
-        severity = _g(row, 30)
-        return LogEvent(
-            source_format=LogFormat.PANOS,
-            timestamp=ts,
-            ip_address=src,
-            user_principal_name=user,
-            path=threat_name or "THREAT",
-            http_method="THREAT",
-            status_code=_threat_status(severity, action),
-            resource_display_name="PAN-OS/THREAT",
-        )
-
-    if log_type.upper() == "AUTH":
-        src = _g(row, 6)
-        user = _g(row, 7)
-        event = _g(row, 17)
-        return LogEvent(
-            source_format=LogFormat.PANOS,
-            timestamp=ts,
-            ip_address=src,
-            user_principal_name=user,
-            path=event or "AUTH",
-            http_method="AUTH",
-            status_code=403 if (event or "").lower() in ("auth-fail", "failure") else 200,
-            resource_display_name="PAN-OS/AUTH",
-        )
-
-    # Generic fallback for other log types
-    src = _g(row, 6)
+def _traffic(row: list[str], ts: datetime) -> LogEvent:
+    proto = _g(row, _PROTO)
     return LogEvent(
         source_format=LogFormat.PANOS,
         timestamp=ts,
-        ip_address=src,
+        ip_address=_ip(_g(row, _SRC)),
+        user_principal_name=_cap(_g(row, _SRC_USER)),
+        app_display_name=_g(row, _APP),
+        http_method=proto.upper() if proto and _PROTO_RE.fullmatch(proto) else None,
+        path=_endpoint(_ip(_g(row, _DST)), _g(row, _DPORT)),
+        status_code=_action_status(_g(row, _ACTION)),
+        resource_display_name="PAN-OS/TRAFFIC",
+    )
+
+
+def _threat(row: list[str], ts: datetime) -> LogEvent:
+    subtype = _g(row, _SUBTYPE)
+    threat = _g(row, _THREAT_ID)
+    if not threat or not _THREAT_ID_RE.sub("", threat).strip():
+        # URL-filtering records carry only "(9999)" here; the URL is in URL/Filename.
+        threat = _g(row, _URL) or threat
+    # Category is the URL category or WildFire verdict ("any" otherwise); Threat
+    # Category classifies the signature (e.g. sql-injection).
+    category = next(
+        (v for v in (_g(row, _CATEGORY), _g(row, _THREAT_CATEGORY))
+         if v and v.lower() not in _UNSET_CATEGORIES),
+        None,
+    )
+    return LogEvent(
+        source_format=LogFormat.PANOS,
+        timestamp=ts,
+        ip_address=_ip(_g(row, _SRC)),
+        user_principal_name=_cap(_g(row, _SRC_USER)),
+        app_display_name=_g(row, _APP),
+        http_method="THREAT",
+        path=threat or "THREAT",
+        status_code=_threat_status(_g(row, _SEVERITY), _g(row, _ACTION)),
+        resource_display_name=_cap("/".join(p for p in ("PAN-OS/THREAT", subtype, category) if p)),
+    )
+
+
+def _auth(row: list[str], ts: datetime) -> LogEvent:
+    event = _g(row, _AUTH_EVENT)
+    status = _auth_status(event)
+    return LogEvent(
+        source_format=LogFormat.PANOS,
+        timestamp=ts,
+        ip_address=_ip(_g(row, _AUTH_SRC)),
+        user_principal_name=_cap(_g(row, _AUTH_USER) or _g(row, _AUTH_NORMALIZED_USER)),
+        http_method="AUTH",
+        path=event or "AUTH",
+        status_code=status,
+        failure_reason=(_g(row, _AUTH_DESCRIPTION) or event) if status == 403 else None,
+        resource_display_name="PAN-OS/AUTH",
+    )
+
+
+def _row_to_log(row: list[str]) -> LogEvent | None:
+    log_type = (_g(row, _TYPE) or "").upper()
+    if log_type not in _PANOS_TYPES:
+        return None  # a header row (e.g. a web-UI CSV export) or not a PAN-OS record
+
+    ts = (
+        _parse_ts(_g(row, _GENERATED_TIME))
+        or _parse_ts(_g(row, _RECEIVE_TIME))
+        or datetime.now(timezone.utc)
+    )
+    if log_type == "TRAFFIC":
+        return _traffic(row, ts)
+    if log_type == "THREAT":
+        return _threat(row, ts)
+    if log_type in _AUTH_TYPES:
+        return _auth(row, ts)
+
+    # Other log types: a minimal event. Position 7 is the source address in the
+    # DECRYPTION, SCTP and CORRELATION layouts and something else (a user, a vsys,
+    # a host) in others, which the address check turns into None.
+    return LogEvent(
+        source_format=LogFormat.PANOS,
+        timestamp=ts,
+        ip_address=_ip(_g(row, _SRC)),
         path=log_type,
-        http_method=log_type.upper() or None,
+        http_method=log_type,
         status_code=200,
         resource_display_name="PAN-OS",
     )
@@ -151,29 +267,22 @@ def parse_panos(raw_text: str) -> list[LogEvent]:
         if not line or line.startswith("#"):
             continue
         try:
-            reader = csv.reader(io.StringIO(line))
-            for row in reader:
-                e = _row_to_log(row)
-                if e:
-                    events.append(e)
+            event = _row_to_log(next(csv.reader([line])))
         except Exception as exc:
             logger.debug("PAN-OS: skipping line: %s", exc)
+            continue
+        if event:
+            events.append(event)
     logger.info("PAN-OS parser: %d events", len(events))
     return events
 
 
-# PAN-OS log type values used as discriminator
-_PANOS_TYPES = frozenset({"TRAFFIC", "THREAT", "AUTH", "URL", "DATA", "HIPMATCH", "TUNNEL", "USERID", "DECRYPTION", "GLOBALPROTECT"})
-
-_PANOS_SERIAL_RE = re.compile(r"^\d{10,},")  # serial number in field 2
-
-
 def _is_panos_line(line: str) -> bool:
-    parts = line.split(",", 5)
-    if len(parts) < 4:
+    """A PAN-OS log type at position 3 and a PAN-OS time at Receive or Generated Time."""
+    parts = line.split(",", 7)
+    if len(parts) < 7 or parts[_TYPE].strip().upper() not in _PANOS_TYPES:
         return False
-    log_type = parts[3].strip().upper()
-    return log_type in _PANOS_TYPES
+    return any(_TS_RE.fullmatch(parts[i].strip()) for i in (_RECEIVE_TIME, _GENERATED_TIME))
 
 
 class PanosParser(BaseParser):
@@ -181,17 +290,15 @@ class PanosParser(BaseParser):
 
     @classmethod
     def can_parse(cls, content: str, filename: str) -> bool:
-        if filename and any(s in filename.lower() for s in ("panos", "pan-os", "panorama", "palo")):
-            pass
-        count = 0
+        checked = 0
         for line in content.splitlines():
             line = line.strip()
             if not line or line.startswith("#"):
                 continue
             if _is_panos_line(line):
                 return True
-            count += 1
-            if count >= 10:
+            checked += 1
+            if checked >= 10:
                 break
         return False
 
