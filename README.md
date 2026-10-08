@@ -183,7 +183,7 @@ Timestamps keep the offset the source gives. Formats without one (Microsoft 365 
 | AWS GuardDuty | Cloud Security | `guardduty` | Managed threat detection findings from AWS GuardDuty. |
 | AWS Inspector v2 | Cloud Security | `aws_inspector` | Vulnerability and package findings from AWS Inspector. |
 | AWS Security Hub | Cloud Security | `aws_securityhub` | Aggregated security findings (ASFF) from across AWS security services. |
-| Kubernetes Audit Log | Cloud-Native | `k8s_audit` | Every request made to the Kubernetes API server, including who did what to which resource. |
+| [Kubernetes Audit Log](https://logtriage.app/reference/log-formats/k8s-audit/) | Cloud-Native | `k8s_audit` | Every request made to the Kubernetes API server, including who did what to which resource. |
 | MySQL | Database | `mysql` | Slow query and error logs from MySQL/MariaDB. |
 | PostgreSQL | Database | `postgresql` | CSV-format error and connection logs from PostgreSQL. |
 | Carbon Black | EDR | `carbonblack` | Endpoint event and detection data from Carbon Black EDR and Cloud. |
@@ -191,7 +191,7 @@ Timestamps keep the offset the source gives. Formats without one (Microsoft 365 
 | Microsoft Defender for Endpoint | EDR | `mdatp` | Alerts and advanced hunting events from Microsoft Defender ATP. |
 | SentinelOne | EDR | `sentinelone` | Threat detections and agent telemetry from the SentinelOne endpoint platform. |
 | Linux auth.log / secure | Endpoint | `auth_log` | SSH, sudo, and PAM authentication events from Linux hosts. |
-| Sysmon | Endpoint | `sysmon` | Deep Windows process, network, and file-system telemetry from Microsoft Sysinternals Sysmon. |
+| [Sysmon](https://logtriage.app/reference/log-formats/sysmon/) | Endpoint | `sysmon` | Deep Windows process, network, and file-system telemetry from Microsoft Sysinternals Sysmon. |
 | Windows Event Log | Endpoint | `evtx` | Native Windows Event Log XML and binary .evtx exports. |
 | Cisco ASA / FTD | Firewall | `cisco_asa` | Connection and threat events from Cisco ASA and Firepower Threat Defense appliances. |
 | FortiGate | Firewall | `fortigate` | Fortinet FortiGate UTM/NGFW traffic and security event logs. |
@@ -201,9 +201,9 @@ Timestamps keep the offset the source gives. Formats without one (Microsoft 365 
 | Generic JSON / NDJSON | Generic | `generic_json` | Any structured JSON or newline-delimited JSON application log. |
 | Wazuh | HIDS | `wazuh` | Host-based intrusion detection alerts from the Wazuh agent platform. |
 | [Azure AD Sign-In Logs](https://logtriage.app/reference/log-formats/azure-ad-signin/) | Identity | `azure_signin` | Every interactive and non-interactive sign-in to Microsoft Entra ID, with conditional access and MFA detail. |
-| Duo Security | Identity | `duo` | Multi-factor authentication events from Cisco Duo. |
+| [Duo Security](https://logtriage.app/reference/log-formats/duo/) | Identity | `duo` | Multi-factor authentication events from Cisco Duo. |
 | JumpCloud Directory | Identity | `jumpcloud` | Directory, SSO, and LDAP events from JumpCloud. |
-| Okta System Log | Identity | `okta` | Authentication, admin, and lifecycle events from the Okta identity platform. |
+| [Okta System Log](https://logtriage.app/reference/log-formats/okta/) | Identity | `okta` | Authentication, admin, and lifecycle events from the Okta identity platform. |
 | Snort | IDS/IPS | `snort` | Alert logs from the Snort network intrusion detection system. |
 | Suricata | IDS/IPS | `suricata` | EVE JSON alert, flow, and protocol logs from the Suricata network IDS/IPS. |
 | Zeek | IDS/IPS | `zeek` | Network connection and protocol logs from the Zeek (Bro) network monitor. |
