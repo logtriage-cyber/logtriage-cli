@@ -262,7 +262,7 @@ compromised: rotate its keys and review what it ran after 02:14 UTC.
 ## Privacy
 
 - `formats`, `detect`, `parse` and `summary` run entirely on your machine. They read only the files you name and make no network connections.
-- `analyze` uploads the file you name, and only that file. The hosted service deletes uploaded files automatically after 7 days (the parsed results and report stay in your account until you delete the analysis) and does not train models on your data. Questions: logtriage@gmail.com.
+- `analyze` uploads the file you name, and only that file. The hosted service deletes uploaded files automatically after 7 days (the parsed results and report stay in your account until you delete the analysis) and does not train models on your data. Questions: hello@logtriage.app.
 
 ## Related
 
