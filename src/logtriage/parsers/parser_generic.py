@@ -3,19 +3,21 @@
 """
 Generic fallback parser for CSV and NDJSON (newline-delimited JSON) log formats.
 
-Expected columns / fields (case-insensitive, flexible naming):
-  timestamp  / time / time_local / date / created_at
-  ip_address / ip / remote_ip / remote_addr / client_ip / src_ip
-  http_method / method / verb / request_method
-  path       / url / endpoint / uri / request_uri
-  status_code / status / response / response_code / code
-  response_size_bytes / bytes / bytes_sent / body_bytes_sent / size
-  user_agent / ua / agent / useragent / http_user_agent
-  referrer   / referer / http_referer
-  user_principal_name / user / username / user_email / upn / email
+Fields are resolved through ordered candidate lists (_CANDIDATES): the first
+non-empty candidate wins. Keys are matched case-insensitively with spaces and
+hyphens normalised ("Client IP", "original-client-ip"), against top-level
+keys, dotted paths ("client.ip") and nested leaf names (except under
+destination/server-side objects). Forwarded/original client addresses outrank
+the immediate peer, an authenticated user outranks a generic user name, and
+"@timestamp", ISO 8601, nginx time_local and epoch s/ms timestamps parse.
+
+Input shapes: CSV with a header row; JSON arrays; wrapper objects holding the
+record list (records/events/logs/data/items/value/results/entries, or an
+Elasticsearch hits export); NDJSON; a single JSON record.
 
 Special handling:
   request field "GET /path HTTP/1.1" is split into http_method + path.
+  X-Forwarded-For lists resolve to the first (client) address.
   nginx "-" placeholder values are normalised to None.
 """
 from __future__ import annotations
@@ -24,6 +26,7 @@ import csv
 import io
 import json
 import logging
+import re
 from datetime import datetime, timezone
 from typing import Any
 
@@ -32,56 +35,99 @@ from logtriage.models import LogEvent, LogFormat
 
 logger = logging.getLogger(__name__)
 
-# Field name aliases → canonical name
-_FIELD_MAP: dict[str, str] = {
-    # Timestamp
-    "time":             "timestamp",
-    "time_local":       "timestamp",        # nginx $time_local
-    "date":             "timestamp",
-    "created_at":       "timestamp",
-    "datetime":         "timestamp",
-    # IP address
-    "ip":               "ip_address",
-    "remote_ip":        "ip_address",       # nginx JSON log_format
-    "remote_addr":      "ip_address",       # nginx $remote_addr
-    "client_ip":        "ip_address",
-    "clientip":         "ip_address",       # Logstash ECS
-    "source_ip":        "ip_address",
-    "src_ip":           "ip_address",
-    # HTTP method
-    "method":           "http_method",
-    "verb":             "http_method",
-    "request_method":   "http_method",      # nginx $request_method
-    # Path
-    "url":              "path",
-    "endpoint":         "path",
-    "uri":              "path",
-    "request_uri":      "path",             # nginx $request_uri
-    # Status code
-    "status":           "status_code",
-    "response_code":    "status_code",
-    "response":         "status_code",      # nginx JSON "response" field
-    "code":             "status_code",
-    # Response size
-    "bytes":            "response_size_bytes",  # nginx JSON "bytes" field
-    "bytes_sent":       "response_size_bytes",
-    "body_bytes_sent":  "response_size_bytes",  # nginx $body_bytes_sent
-    "size":             "response_size_bytes",
-    # User-agent
-    "ua":               "user_agent",
-    "agent":            "user_agent",       # nginx JSON "agent" field
-    "useragent":        "user_agent",
-    "http_user_agent":  "user_agent",       # nginx $http_user_agent
-    # Referrer
-    "referer":          "referrer",
-    "http_referer":     "referrer",         # nginx $http_referer
-    # User / identity
-    "user":             "user_principal_name",
-    "username":         "user_principal_name",
-    "user_email":       "user_principal_name",
-    "upn":              "user_principal_name",
-    "email":            "user_principal_name",
+# Candidate source fields per canonical field, in priority order — the first
+# non-empty one wins. Keys are matched after normalisation (lower-case, runs
+# of spaces/hyphens/dots-in-names → "_"), so "original-client-ip", "Client IP"
+# and "client_ip" all match. Nested objects are searched too (see
+# _flatten): a candidate matches a top-level key, a full dotted path
+# ("client.ip"), or — for objects not describing the destination/server side —
+# a nested leaf name ("meta.auth_user" matches "auth_user").
+#
+# Priority matters (found 2026-10-16 on a real JSON access log behind a
+# gateway): the immediate peer field ("client_ip") held ~10 internal hop
+# addresses while a nested original/forwarded client field held the ~440 real
+# clients, and "@timestamp" was not recognised at all, so every event got the
+# time of analysis. Forwarded/original client fields therefore outrank peer
+# fields, and an authenticated user outranks a generic user name.
+_CANDIDATES: dict[str, tuple[str, ...]] = {
+    "timestamp": (
+        "timestamp", "@timestamp", "time", "time_iso8601", "time_local", "datetime", "date",
+        "ts", "event_time", "eventtime", "created_at", "logged_at", "timegenerated",
+    ),
+    "ip_address": (
+        "original_client_ip", "true_client_ip", "cf_connecting_ip", "x_real_ip", "real_ip",
+        "x_forwarded_for", "http_x_forwarded_for", "forwarded_for",
+        "client_ip", "clientip", "client.ip", "client_address", "c_ip",
+        "source_ip", "src_ip", "source.ip", "sourceip",
+        "remote_addr", "remote_ip", "remoteaddr", "remote_address", "remote_host",
+        "ip_address", "ipaddress", "ip",
+    ),
+    "http_method": ("http_method", "request_method", "method", "verb", "cs_method", "httpmethod", "http.request.method"),
+    "path": (
+        "path", "request_path", "url_path", "url.path", "request_uri", "uri", "request_url",
+        "url", "url.original", "endpoint", "path_info", "cs_uri_stem",
+    ),
+    "status_code": (
+        "status_code", "http_status", "http_status_code", "response_status", "statuscode", "sc_status",
+        "status", "response_code", "http.response.status_code", "response", "code",
+    ),
+    "response_size_bytes": (
+        "response_size_bytes", "bytes", "bytes_sent", "body_bytes_sent", "response_size",
+        "response_content_size", "bytes_out", "sc_bytes", "size",
+    ),
+    "user_agent": ("user_agent", "http_user_agent", "useragent", "user_agent.original", "ua", "agent", "cs_user_agent"),
+    "referrer": ("referrer", "referer", "http_referer", "cs_referer"),
+    "user_principal_name": (
+        "user_principal_name", "userprincipalname", "upn", "auth_user", "remote_user", "user_name",
+        "username", "user", "user.name", "cs_username", "account_name", "login", "user_email", "email",
+        "user_id", "userid",
+    ),
 }
+
+# Nested objects describing the far side of a connection: their leaves must
+# not be mistaken for the client ("destination.ip" is not the source).
+_DESTINATION_PARENTS = frozenset({
+    "destination", "dst", "dest", "server", "upstream", "target", "backend", "peer", "host", "observer",
+})
+_KEY_SEP = re.compile(r"[\s\-]+")
+
+
+def _norm_key(key: str) -> str:
+    return _KEY_SEP.sub("_", str(key).strip().lower())
+
+
+def _flatten(record: dict[str, Any], max_depth: int = 3) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Return ({dotted path: value}, {leaf name: value}) for scalar values.
+
+    Top-level keys are their own dotted path. Leaves come from nested objects
+    only, first occurrence wins, and skip anything under a destination-side
+    parent.
+    """
+    paths: dict[str, Any] = {}
+    leaves: dict[str, Any] = {}
+
+    def walk(obj: dict[str, Any], prefix: tuple[str, ...]) -> None:
+        for raw_key, value in obj.items():
+            key = _norm_key(raw_key)
+            path = prefix + (key,)
+            if isinstance(value, dict):
+                if len(path) < max_depth:
+                    walk(value, path)
+                continue
+            paths.setdefault(".".join(path), value)
+            if prefix and not (set(prefix) & _DESTINATION_PARENTS):
+                leaves.setdefault(key, value)
+
+    walk(record, ())
+    return paths, leaves
+
+
+def _first_ip(value: Any) -> Any:
+    """X-Forwarded-For style lists ("client, proxy1, proxy2") → the client."""
+    if isinstance(value, str) and "," in value:
+        return value.split(",", 1)[0].strip()
+    return value
+
 
 # Nginx uses "-" as a placeholder for missing optional fields; strip these.
 def _clean(val: Any) -> Any:
@@ -92,13 +138,19 @@ def _clean(val: Any) -> Any:
 
 
 def _normalise_keys(record: dict[str, Any]) -> dict[str, Any]:
+    paths, leaves = _flatten(record)
     out: dict[str, Any] = {}
-    for k, v in record.items():
-        canonical = _FIELD_MAP.get(k.lower().strip(), k.lower().strip())
-        out[canonical] = v
+    for canonical, candidates in _CANDIDATES.items():
+        for name in candidates:
+            value = paths.get(name)
+            if _clean(value) is None and "." not in name:
+                value = leaves.get(name)
+            if _clean(value) is not None:
+                out[canonical] = _first_ip(value) if canonical == "ip_address" else value
+                break
 
     # Handle nginx-style request line: "GET /path HTTP/1.1" → method + path
-    request_line = out.pop("request", None)
+    request_line = paths.get("request")
     if isinstance(request_line, str) and request_line.strip():
         parts = request_line.split()
         if len(parts) >= 2 and not out.get("http_method"):
@@ -110,22 +162,34 @@ def _normalise_keys(record: dict[str, Any]) -> dict[str, Any]:
 
 
 def _parse_ts(raw: Any) -> datetime:
-    if not raw:
+    if raw is None or raw == "":
         return datetime.now(timezone.utc)
-    s = str(raw).strip().replace("Z", "+00:00")
+    # Epoch seconds or milliseconds (numbers or numeric strings), only within
+    # plausible ranges (2001-2286) so a compact date such as 20261015 is not
+    # misread as a 1970 timestamp.
+    if isinstance(raw, (int, float)) or (isinstance(raw, str) and raw.strip().replace(".", "", 1).isdigit()):
+        try:
+            value = float(raw)
+            if 1e12 <= value < 1e13:  # milliseconds
+                value /= 1000
+            if 1e9 <= value < 1e10:
+                return datetime.fromtimestamp(value, tz=timezone.utc)
+        except (ValueError, OverflowError, OSError):
+            pass
+    s = str(raw).strip()
+    try:  # ISO 8601 incl. "Z", fractions and offsets
+        dt = datetime.fromisoformat(s.replace("Z", "+00:00"))
+        return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+    except ValueError:
+        pass
     for fmt in (
-        "%Y-%m-%dT%H:%M:%S%z",
-        "%Y-%m-%dT%H:%M:%S.%f%z",
-        "%Y-%m-%d %H:%M:%S%z",
-        "%Y-%m-%d %H:%M:%S",
+        "%Y-%m-%d %H:%M:%S.%f",
         "%d/%b/%Y:%H:%M:%S %z",         # nginx $time_local: "17/May/2015:08:05:32 +0000"
-        "%Y-%m-%d",
+        "%Y/%m/%d %H:%M:%S",
     ):
         try:
             dt = datetime.strptime(s, fmt)
-            if dt.tzinfo is None:
-                dt = dt.replace(tzinfo=timezone.utc)
-            return dt
+            return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
         except ValueError:
             continue
     return datetime.now(timezone.utc)
@@ -171,6 +235,47 @@ def parse_ndjson(raw_text: str) -> list[LogEvent]:
         except (json.JSONDecodeError, Exception) as exc:
             logger.debug("NDJSON line %d skipped: %s", i + 1, exc)
     logger.info("NDJSON parser: %d events", len(events))
+    return events
+
+
+# Wrapper keys that commonly hold the record list in exported JSON documents.
+_CONTAINER_KEYS = ("records", "events", "logs", "data", "items", "value", "results", "entries", "hits")
+
+
+def parse_json(raw_text: str) -> list[LogEvent]:
+    """Parse a JSON array, a wrapper object holding a record list, or NDJSON.
+
+    The registry has always advertised "JSON array or NDJSON", but only the
+    NDJSON path existed, so a pretty-printed array parsed to nothing.
+    """
+    stripped = raw_text.strip()
+    try:
+        doc = json.loads(stripped)
+    except (json.JSONDecodeError, ValueError):
+        return parse_ndjson(raw_text)  # several objects, one per line
+    records: list[Any] = []
+    if isinstance(doc, list):
+        records = doc
+    elif isinstance(doc, dict):
+        for key in _CONTAINER_KEYS:
+            inner = doc.get(key)
+            if isinstance(inner, dict) and isinstance(inner.get("hits"), list):  # Elasticsearch export
+                inner = [h.get("_source", h) for h in inner["hits"] if isinstance(h, dict)]
+            if isinstance(inner, list) and inner and all(isinstance(r, dict) for r in inner):
+                records = inner
+                break
+        else:
+            records = [doc]  # a single record
+    events: list[LogEvent] = []
+    for i, record in enumerate(records):
+        if not isinstance(record, dict):
+            continue
+        try:
+            if event := _record_to_event(record):
+                events.append(event)
+        except Exception as exc:
+            logger.debug("JSON record %d skipped: %s", i + 1, exc)
+    logger.info("JSON parser: %d events", len(events))
     return events
 
 
@@ -234,4 +339,4 @@ class GenericJsonParser(BaseParser):
 
     @classmethod
     def parse(cls, content: str, filename: str = "") -> list[LogEvent]:
-        return parse_ndjson(content)
+        return parse_json(content)
