@@ -53,7 +53,7 @@ _ADMIN_OPS = {
     "add member to role", "remove member from role", "update role",
     "add role member to role", "add application.",
     "set-transportrule", "new-transportrule", "set-mailboxautoreplyconfiguration",
-    "set-inboxrule", "new-inboxrule", "set-owaMailboxPolicy",
+    "set-inboxrule", "new-inboxrule", "set-owamailboxpolicy",
     "add-unifiedgrouplinks", "set-unifiedgroup",
     "new-managementroleassignment", "add-rolegroupmember",
 }

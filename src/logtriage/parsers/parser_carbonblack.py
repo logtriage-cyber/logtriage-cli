@@ -30,10 +30,13 @@ logger = logging.getLogger(__name__)
 
 _EDR_PREFIX = "ingress.event."
 _WATCHLIST_PREFIX = "watchlist."
+# Alerts raised from watchlist hits, e.g. alert.watchlist.hit.ingress.process (cb-event-forwarder).
+# Until 2026-10-20 they fell through to the generic fallback and scored as benign (200).
+_ALERT_PREFIX = "alert."
 
 # EDR event types → approximate status codes
 _EDR_STATUS: dict[str, int] = {
-    "ingress.event.ingress.event.netconn": 200,
+    "ingress.event.netconn": 200,
     "ingress.event.filemod": 200,
     "ingress.event.regmod": 200,
     "ingress.event.process": 200,
@@ -77,7 +80,7 @@ def _edr_to_log(obj: dict) -> LogEvent | None:
         md5 if md5 and len(md5) == 32 else None
     )
 
-    status = _EDR_STATUS.get(event_type, 403 if event_type.startswith(_WATCHLIST_PREFIX) else 200)
+    status = _EDR_STATUS.get(event_type, 403 if event_type.startswith((_WATCHLIST_PREFIX, _ALERT_PREFIX)) else 200)
 
     return LogEvent(
         source_format=LogFormat.CARBONBLACK,
@@ -135,7 +138,7 @@ def _cbc_to_log(obj: dict) -> LogEvent | None:
 
 def _obj_to_log(obj: dict) -> LogEvent | None:
     event_type = obj.get("type", "")
-    if event_type.startswith(_EDR_PREFIX) or event_type.startswith(_WATCHLIST_PREFIX):
+    if event_type.startswith((_EDR_PREFIX, _WATCHLIST_PREFIX, _ALERT_PREFIX)):
         return _edr_to_log(obj)
     if "deviceInfo" in obj:
         return _cbc_to_log(obj)

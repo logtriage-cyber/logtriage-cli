@@ -64,7 +64,7 @@ def _ts(raw: str | None) -> datetime:
 def _method_to_path(method: str | None, service: str | None) -> str:
     if not method:
         return "/gcp/unknown"
-    # methodName is like "google.iam.admin.v1.IAM.CreateRole"
+    # methodName is like "google.iam.admin.v1.CreateRole"
     # or "storage.objects.get"
     parts = method.replace("google.", "").replace(".", "/").lower()
     return f"/gcp/{parts}"

@@ -30,7 +30,10 @@ from logtriage.models import LogEvent, LogFormat
 
 logger = logging.getLogger(__name__)
 
-_DENY_RESULTS = frozenset({"deny", "fraud", "denied"})
+# Duo reports a failed or refused authentication as FAILURE (v1 API, any case) or
+# denied (v2), and a user-reported attempt as FRAUD. Until 2026-10-20 "failure" was
+# missing here, so a real wrong-passcode or blocked-push event parsed as a success.
+_DENY_RESULTS = frozenset({"deny", "denied", "failure", "fraud"})
 _HIGH_RISK_ADMIN_ACTIONS = frozenset({
     "user_delete", "user_update", "policy_update", "policy_delete",
     "integration_delete", "group_update", "settings_update",

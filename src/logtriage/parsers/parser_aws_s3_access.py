@@ -67,7 +67,6 @@ def _parse_line(line: str) -> LogEvent | None:
         head = before.split()
 
     bucket = head[1] if len(head) >= 2 else None
-    remote_ip = head[3] if len(head) >= 4 else None
 
     # Split portion after the bracket
     after = line[m.end():].strip()
@@ -76,10 +75,16 @@ def _parse_line(line: str) -> LogEvent | None:
     except ValueError:
         tail = after.split()
 
-    # After bracket: requester request_id operation key "request_uri" http_status ...
-    key = tail[3] if len(tail) >= 4 else None
-    request_uri = tail[4] if len(tail) >= 5 else None
-    http_status_raw = tail[5] if len(tail) >= 6 else None
+    # After the time bracket, in AWS's documented order: remote_ip requester request_id
+    # operation key "request_uri" http_status error_code bytes_sent object_size
+    # total_time turn_around_time "referer" "user_agent" ... Until 2026-10-20 this read
+    # the IP from before the bracket (always missing) and every later field one column
+    # early, so S3 events had no client IP, no status and the operation as their path.
+    remote_ip = tail[0] if tail else None
+    requester = tail[1] if len(tail) >= 2 else None
+    key = tail[4] if len(tail) >= 5 else None
+    request_uri = tail[5] if len(tail) >= 6 else None
+    http_status_raw = tail[6] if len(tail) >= 7 else None
     ua = tail[13] if len(tail) >= 14 else None
 
     http_status: int | None = None
@@ -103,11 +108,13 @@ def _parse_line(line: str) -> LogEvent | None:
     return LogEvent(
         source_format=LogFormat.AWS_S3_ACCESS,
         timestamp=ts,
-        ip_address=remote_ip if remote_ip != "-" else None,
+        ip_address=remote_ip if remote_ip and remote_ip != "-" else None,
         http_method=method,
         path=path,
         status_code=http_status,
         user_agent=ua if ua and ua != "-" else None,
+        # "-" is an unauthenticated (anonymous) request
+        user_principal_name=requester if requester and requester != "-" else None,
         resource_display_name=f"s3://{bucket}" if bucket else None,
         raw_line=line,
     )

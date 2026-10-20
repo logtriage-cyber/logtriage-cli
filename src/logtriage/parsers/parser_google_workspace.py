@@ -30,18 +30,24 @@ from logtriage.models import LogEvent, LogFormat
 
 logger = logging.getLogger(__name__)
 
+# Event names as Google documents them for the Reports API (compared upper-cased: the
+# login application names events in lower case, e.g. suspicious_login, 2sv_disable).
+# Until 2026-10-20 this list held invented names (SUPER_ADMIN_ADD, ADMIN_ROLE_ASSIGNMENT)
+# while the real super-admin grant (GRANT_ADMIN_PRIVILEGE) was only medium risk and an
+# admin turning off a user's 2-Step Verification was not recognised at all.
 _HIGH_RISK_EVENTS = frozenset({
     "SUSPICIOUS_LOGIN", "SUSPICIOUS_LOGIN_LESS_SECURE_APP",
     "ACCOUNT_DISABLED_SPAMMING", "ACCOUNT_DISABLED_GENERIC",
     "PASSWORD_EDIT", "RECOVERY_EMAIL_EDIT", "RECOVERY_PHONE_EDIT",
-    "2SV_DISABLE", "ADMIN_ROLE_ASSIGNMENT", "SUPER_ADMIN_ADD",
+    "2SV_DISABLE", "TURN_OFF_2_STEP_VERIFICATION",
+    "GRANT_ADMIN_PRIVILEGE", "GRANT_DELEGATED_ADMIN_PRIVILEGES",
     "CREATE_APPLICATION_SETTING", "DELETE_USER", "SUSPEND_USER",
     "ADMIN_TAKEOUT_FAILURE", "CHROME_OS_DEVICE_DISABLED",
 })
 
 _MED_RISK_EVENTS = frozenset({
     "CREATE_USER", "RENAME_USER", "CHANGE_PASSWORD",
-    "GRANT_ADMIN_PRIVILEGE", "REVOKE_ADMIN_PRIVILEGE",
+    "REVOKE_ADMIN_PRIVILEGE", "ASSIGN_ROLE",
     "ADD_GROUP_MEMBER", "REMOVE_GROUP_MEMBER",
     "LOGIN_FAILURE", "LOGOUT",
 })
