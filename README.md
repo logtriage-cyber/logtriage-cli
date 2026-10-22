@@ -192,7 +192,7 @@ Timestamps keep the offset the source gives. Formats without one (Microsoft 365 
 | SentinelOne | EDR | `sentinelone` | Threat detections and agent telemetry from the SentinelOne endpoint platform. |
 | Linux auth.log / secure | Endpoint | `auth_log` | SSH, sudo, and PAM authentication events from Linux hosts. |
 | [Sysmon](https://logtriage.app/reference/log-formats/sysmon/) | Endpoint | `sysmon` | Deep Windows process, network, and file-system telemetry from Microsoft Sysinternals Sysmon. |
-| Windows Event Log | Endpoint | `evtx` | Native Windows Event Log XML and binary .evtx exports. |
+| [Windows Event Log](https://logtriage.app/reference/log-formats/evtx/) | Endpoint | `evtx` | Native Windows Event Log XML and binary .evtx exports. |
 | Cisco ASA / FTD | Firewall | `cisco_asa` | Connection and threat events from Cisco ASA and Firepower Threat Defense appliances. |
 | FortiGate | Firewall | `fortigate` | Fortinet FortiGate UTM/NGFW traffic and security event logs. |
 | Juniper SRX | Firewall | `juniper_srx` | Session creation, close, and deny events from Juniper SRX and ScreenOS firewalls. |
@@ -205,8 +205,8 @@ Timestamps keep the offset the source gives. Formats without one (Microsoft 365 
 | JumpCloud Directory | Identity | `jumpcloud` | Directory, SSO, and LDAP events from JumpCloud. |
 | [Okta System Log](https://logtriage.app/reference/log-formats/okta/) | Identity | `okta` | Authentication, admin, and lifecycle events from the Okta identity platform. |
 | Snort | IDS/IPS | `snort` | Alert logs from the Snort network intrusion detection system. |
-| Suricata | IDS/IPS | `suricata` | EVE JSON alert, flow, and protocol logs from the Suricata network IDS/IPS. |
-| Zeek | IDS/IPS | `zeek` | Network connection and protocol logs from the Zeek (Bro) network monitor. |
+| [Suricata](https://logtriage.app/reference/log-formats/suricata/) | IDS/IPS | `suricata` | EVE JSON alert, flow, and protocol logs from the Suricata network IDS/IPS. |
+| [Zeek](https://logtriage.app/reference/log-formats/zeek/) | IDS/IPS | `zeek` | Network connection and protocol logs from the Zeek (Bro) network monitor. |
 | HAProxy | Network | `haproxy` | HTTP and TCP access logs from the HAProxy load balancer. |
 | Syslog (RFC 5424 / 3164) | Network | `syslog` | The universal network device and application logging standard. |
 | Traefik | Network | `traefik` | Structured access logs from the Traefik reverse proxy. |
