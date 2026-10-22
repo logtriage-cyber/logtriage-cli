@@ -203,8 +203,6 @@ class ZeekParser(BaseParser):
 
     @classmethod
     def can_parse(cls, content: str, filename: str) -> bool:
-        if filename and "zeek" in filename.lower():
-            pass  # fall through to content check
         for line in content.splitlines():
             stripped = line.strip()
             if not stripped:

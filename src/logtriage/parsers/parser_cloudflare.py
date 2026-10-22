@@ -27,11 +27,11 @@ Key fields mapped:
 """
 from __future__ import annotations
 
-import json
 import logging
 from datetime import datetime, timezone
 from typing import Any
 
+from logtriage.parsers import json_input
 from logtriage.parsers.base_parser import BaseParser
 from logtriage.models import LogEvent, LogFormat
 
@@ -102,29 +102,19 @@ def _parse_event(raw: dict[str, Any]) -> LogEvent | None:
         return None
 
 
+def _is_cloudflare(record: dict[str, Any]) -> bool:
+    if "ClientIP" not in record:
+        return False
+    return (
+        "EdgeResponseStatus" in record
+        or ("ClientRequestMethod" in record and "ClientASN" in record)
+        or ("Action" in record and "RuleID" in record)
+    )
+
+
 def parse_cloudflare(content: str) -> list[LogEvent]:
-    """Parse Cloudflare log NDJSON or JSON array into LogEvents."""
-    records: list[dict[str, Any]] = []
-    stripped = content.strip()
-
-    if stripped.startswith("{"):
-        for line in stripped.splitlines():
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                obj = json.loads(line)
-                if isinstance(obj, dict):
-                    records.append(obj)
-            except json.JSONDecodeError:
-                pass
-    else:
-        try:
-            data = json.loads(stripped)
-            records = data if isinstance(data, list) else [data]
-        except json.JSONDecodeError as exc:
-            raise ValueError(f"Cloudflare parser: invalid JSON — {exc}") from exc
-
+    """Parse Cloudflare Logpush NDJSON (or a JSON array / document) into LogEvents."""
+    records = json_input.records(content, ("result",))
     result = [e for e in (_parse_event(r) for r in records) if e is not None]
     logger.info("Cloudflare parser: %d/%d events parsed", len(result), len(records))
     return result
@@ -135,17 +125,8 @@ class CloudflareParser(BaseParser):
 
     @classmethod
     def can_parse(cls, content: str, filename: str) -> bool:
-        if "cloudflare" in filename.lower():
-            stripped = content.strip()
-            return stripped.startswith("{") or stripped.startswith("[")
-        head = content.strip()[:3000]
-        return (
-            '"ClientIP"' in head and '"EdgeResponseStatus"' in head
-        ) or (
-            '"ClientIP"' in head and '"ClientRequestMethod"' in head and '"ClientASN"' in head
-        ) or (
-            '"ClientIP"' in head and '"Action"' in head and '"RuleID"' in head
-        )
+        head = json_input.sample(content, ("result",))
+        return bool(head) and sum(_is_cloudflare(r) for r in head) * 2 > len(head)
 
     @classmethod
     def parse(cls, content: str, filename: str = "") -> list[LogEvent]:

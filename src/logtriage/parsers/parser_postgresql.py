@@ -118,10 +118,6 @@ class PostgresqlParser(BaseParser):
 
     @classmethod
     def can_parse(cls, content: str, filename: str) -> bool:
-        if filename:
-            fn = filename.lower()
-            if ("postgres" in fn or "pg" in fn) and fn.endswith(".csv"):
-                return True
         return _is_pg_csv(content)
 
     @classmethod

@@ -249,8 +249,6 @@ class SysmonParser(BaseParser):
 
     @classmethod
     def can_parse(cls, content: str, filename: str) -> bool:
-        if filename and "sysmon" in filename.lower():
-            return _is_sysmon_xml(content) or True
         return _is_sysmon_xml(content)
 
     @classmethod

@@ -131,10 +131,6 @@ class AwsS3AccessParser(BaseParser):
 
     @classmethod
     def can_parse(cls, content: str, filename: str) -> bool:
-        if filename:
-            fn = filename.lower()
-            if "s3" in fn and ("access" in fn or "server" in fn):
-                return True
         matched = 0
         for line in content.splitlines()[:20]:
             line = line.strip()

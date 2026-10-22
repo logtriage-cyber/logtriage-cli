@@ -3,8 +3,10 @@
 """
 Suricata EVE JSON log parser.
 
-Suricata writes one JSON object per line (NDJSON) or as a JSON array.
-Each object has an event_type field: alert, http, dns, flow, tls, etc.
+Suricata writes one JSON object per line (NDJSON); exports may be a JSON array.
+Each object has an event_type field: alert, http, dns, flow, tls, fileinfo,
+anomaly, and one per application protocol (ssh, smtp, smb, …). Every record
+with a source address becomes an event; stats records are skipped.
 
 Reference: https://docs.suricata.io/en/latest/output/eve/eve-json-output.html
 """
@@ -15,6 +17,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Any
 
+from logtriage.parsers import json_input
 from logtriage.parsers.base_parser import BaseParser
 from logtriage.models import LogEvent, LogFormat
 
@@ -113,44 +116,63 @@ def _event_to_log(evt: dict[str, Any]) -> LogEvent | None:
                 raw_line=json.dumps(evt),
             )
 
-        # stats, fileinfo, anomaly, etc. — skip
-        return None
+        if not src_ip:  # stats and other engine records describe no connection
+            return None
+
+        dest = f"{evt.get('dest_ip', '')}:{evt.get('dest_port', '')}".strip(":")
+
+        if etype == "fileinfo":
+            info = evt.get("fileinfo", {})
+            digest = info.get("sha256") or info.get("md5")
+            return LogEvent(
+                source_format=LogFormat.SURICATA,
+                timestamp=ts,
+                ip_address=src_ip,
+                path=info.get("filename") or dest,
+                resource_display_name=(evt.get("http") or {}).get("hostname") or evt.get("app_proto"),
+                http_method=evt.get("proto"),
+                status_code=200,
+                file_hash=digest if isinstance(digest, str) and len(digest) in (32, 64) else None,
+                raw_line=json.dumps(evt),
+            )
+
+        if etype == "anomaly":
+            anomaly = evt.get("anomaly", {})
+            return LogEvent(
+                source_format=LogFormat.SURICATA,
+                timestamp=ts,
+                ip_address=src_ip,
+                path=anomaly.get("event") or anomaly.get("type") or dest,
+                resource_display_name=f"anomaly ({anomaly.get('layer') or anomaly.get('type') or 'protocol'})",
+                http_method=evt.get("proto"),
+                status_code=400,
+                raw_line=json.dumps(evt),
+            )
+
+        # Protocol records (ssh, smtp, smb, ftp, rdp, krb5, mqtt, pgsql, …): who talked to what
+        return LogEvent(
+            source_format=LogFormat.SURICATA,
+            timestamp=ts,
+            ip_address=src_ip,
+            path=f"{etype}://{dest}" if etype else dest,
+            resource_display_name=etype or None,
+            http_method=evt.get("proto"),
+            status_code=200,
+            raw_line=json.dumps(evt),
+        )
 
     except Exception as exc:
         logger.debug("Suricata: skipping event (type=%s): %s", evt.get("event_type"), exc)
         return None
 
 
+def _is_eve(obj: dict[str, Any]) -> bool:
+    return "event_type" in obj and "timestamp" in obj and ("src_ip" in obj or obj.get("event_type") == "stats")
+
+
 def parse_suricata(raw_text: str) -> list[LogEvent]:
-    events: list[LogEvent] = []
-    stripped = raw_text.strip()
-
-    # JSON array
-    if stripped.startswith("["):
-        try:
-            records = json.loads(stripped)
-            for r in records:
-                if isinstance(r, dict):
-                    if e := _event_to_log(r):
-                        events.append(e)
-            logger.info("Suricata parser: %d events from JSON array", len(events))
-            return events
-        except json.JSONDecodeError:
-            pass
-
-    # NDJSON — one object per line
-    for line in stripped.splitlines():
-        line = line.strip()
-        if not line or not line.startswith("{"):
-            continue
-        try:
-            record = json.loads(line)
-            if e := _event_to_log(record):
-                events.append(e)
-        except json.JSONDecodeError:
-            continue
-
-    logger.info("Suricata parser: %d events from NDJSON", len(events))
+    events = [e for r in json_input.records(raw_text) if (e := _event_to_log(r))]
+    logger.info("Suricata parser: %d events", len(events))
     return events
 
 
@@ -161,22 +183,8 @@ class SuricataParser(BaseParser):
 
     @classmethod
     def can_parse(cls, content: str, filename: str) -> bool:
-        if filename and any(h in filename.lower() for h in ("suricata", "eve.json", "eve-")):
-            return True
-        stripped = content.strip()
-        # First non-empty line must be a JSON object with event_type + src_ip
-        for line in stripped.splitlines():
-            line = line.strip()
-            if not line:
-                continue
-            if not line.startswith("{"):
-                return False
-            try:
-                obj = json.loads(line)
-                return isinstance(obj, dict) and "event_type" in obj and "src_ip" in obj
-            except json.JSONDecodeError:
-                return False
-        return False
+        head = json_input.sample(content)
+        return bool(head) and sum(_is_eve(r) for r in head) * 2 > len(head)
 
     @classmethod
     def parse(cls, content: str, filename: str = "") -> list[LogEvent]:

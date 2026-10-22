@@ -115,8 +115,6 @@ class F5AsmParser(BaseParser):
 
     @classmethod
     def can_parse(cls, content: str, filename: str) -> bool:
-        if filename and any(s in filename.lower() for s in ("f5", "bigip", "asm")):
-            pass
         count = 0
         for line in content.splitlines():
             stripped = _SYSLOG_PREFIX_RE.sub("", line.strip(), count=1)

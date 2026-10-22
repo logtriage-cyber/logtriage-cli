@@ -19,10 +19,10 @@ References:
 """
 from __future__ import annotations
 
-import json
 import logging
 from datetime import datetime, timezone
 
+from logtriage.parsers import json_input
 from logtriage.parsers.base_parser import BaseParser
 from logtriage.models import LogEvent, LogFormat
 
@@ -37,6 +37,9 @@ _HIGH_RISK_EVENTS = frozenset({
     "ProcessBlockedEvent",
     "NetworkContainmentStateChanged",
 })
+
+# API responses wrap records as {"resources": [...]}
+_ENVELOPES = ("resources", "events", "data")
 
 _AUTH_FAIL_EVENTS = frozenset({
     "UserLogonFailed2",
@@ -129,24 +132,14 @@ def _obj_to_log(obj: dict) -> LogEvent | None:
 
 def parse_crowdstrike(raw_text: str) -> list[LogEvent]:
     events: list[LogEvent] = []
-    for line in raw_text.splitlines():
-        line = line.strip()
-        if not line:
-            continue
+    for obj in json_input.records(raw_text, _ENVELOPES):
         try:
-            obj = json.loads(line)
-            if isinstance(obj, list):
-                for item in obj:
-                    if isinstance(item, dict):
-                        e = _obj_to_log(item)
-                        if e:
-                            events.append(e)
-            elif isinstance(obj, dict):
-                e = _obj_to_log(obj)
-                if e:
-                    events.append(e)
-        except (json.JSONDecodeError, Exception) as exc:
-            logger.debug("CrowdStrike: skipping line: %s", exc)
+            e = _obj_to_log(obj)
+        except Exception as exc:
+            logger.debug("CrowdStrike: skipping record: %s", exc)
+            continue
+        if e:
+            events.append(e)
     logger.info("CrowdStrike parser: %d events", len(events))
     return events
 
@@ -164,21 +157,7 @@ class CrowdStrikeParser(BaseParser):
 
     @classmethod
     def can_parse(cls, content: str, filename: str) -> bool:
-        if filename and any(s in filename.lower() for s in ("crowdstrike", "falcon", "fdr")):
-            pass
-        for line in content.splitlines():
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                obj = json.loads(line)
-                if isinstance(obj, list) and obj:
-                    obj = obj[0]
-                if isinstance(obj, dict) and _is_crowdstrike(obj):
-                    return True
-            except (json.JSONDecodeError, Exception):
-                pass
-        return False
+        return any(_is_crowdstrike(r) for r in json_input.sample(content, _ENVELOPES))
 
     @classmethod
     def parse(cls, content: str, filename: str = "") -> list[LogEvent]:

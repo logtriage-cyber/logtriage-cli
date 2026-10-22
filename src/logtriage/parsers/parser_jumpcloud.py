@@ -27,6 +27,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Any
 
+from logtriage.parsers import json_input
 from logtriage.parsers.base_parser import BaseParser
 from logtriage.models import LogEvent, LogFormat
 
@@ -123,64 +124,20 @@ def _is_jumpcloud(obj: Any) -> bool:
     )
 
 
+# Directory Insights API: a bare array; some exports wrap it in {"events"|"results": [...]}
+_ENVELOPES = ("events", "results")
+
+
 class JumpCloudParser(BaseParser):
     format_name = "jumpcloud"
 
     @classmethod
     def can_parse(cls, content: str, filename: str) -> bool:
-        if filename and "jumpcloud" in filename.lower():
-            return True
-        stripped = content.strip()
-        if not stripped.startswith("{") and not stripped.startswith("["):
-            return False
-        try:
-            data = json.loads(stripped)
-            if isinstance(data, list) and data:
-                return _is_jumpcloud(data[0])
-            if isinstance(data, dict):
-                items = data.get("events") or data.get("results")
-                if isinstance(items, list) and items:
-                    return _is_jumpcloud(items[0])
-                return _is_jumpcloud(data)
-        except json.JSONDecodeError:
-            pass
-        for line in stripped.splitlines():
-            line = line.strip()
-            if not line:
-                continue
-            if not line.startswith("{"):
-                return False
-            try:
-                return _is_jumpcloud(json.loads(line))
-            except json.JSONDecodeError:
-                return False
-        return False
+        head = json_input.sample(content, _ENVELOPES)
+        return bool(head) and sum(_is_jumpcloud(r) for r in head) * 2 > len(head)
 
     @classmethod
     def parse(cls, content: str, filename: str = "") -> list[LogEvent]:
-        events: list[LogEvent] = []
-        stripped = content.strip()
-        try:
-            data = json.loads(stripped)
-            items: list[Any] = []
-            if isinstance(data, list):
-                items = data
-            elif isinstance(data, dict):
-                items = data.get("events") or data.get("results") or ([data] if _is_jumpcloud(data) else [])
-            for obj in items:
-                if ev := _event_to_log(obj):
-                    events.append(ev)
-        except json.JSONDecodeError:
-            for line in stripped.splitlines():
-                line = line.strip()
-                if not line or not line.startswith("{"):
-                    continue
-                try:
-                    obj = json.loads(line)
-                    if ev := _event_to_log(obj):
-                        events.append(ev)
-                except json.JSONDecodeError:
-                    continue
-
+        events = [ev for obj in json_input.records(content, _ENVELOPES) if (ev := _event_to_log(obj))]
         logger.info("JumpCloud parser: %d events", len(events))
         return events

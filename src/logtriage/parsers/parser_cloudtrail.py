@@ -15,6 +15,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Any
 
+from logtriage.parsers import json_input
 from logtriage.parsers.base_parser import BaseParser
 from logtriage.models import LogEvent, LogFormat
 
@@ -88,17 +89,34 @@ def _parse_record(record: dict[str, Any]) -> LogEvent | None:
         return None
 
 
+def _is_cloudtrail_record(record: dict[str, Any]) -> bool:
+    return isinstance(record.get("eventSource"), str) and isinstance(record.get("eventName"), str)
+
+
+def _records(raw_text: str) -> list[dict[str, Any]]:
+    """CloudTrail events from a log file ({"Records": [...]}), `aws cloudtrail
+    lookup-events` output ({"Events": [{"CloudTrailEvent": "<JSON>"}]}), or events
+    one per line (CloudTrail Lake / CloudWatch Logs / EventBridge exports)."""
+    out: list[dict[str, Any]] = []
+    for record in json_input.records(raw_text, ("Records", "Events")):
+        inner = record.get("CloudTrailEvent")
+        if isinstance(inner, str):
+            try:
+                inner = json.loads(inner)
+            except ValueError:
+                inner = None
+        if isinstance(inner, dict):
+            record = inner
+        elif record.get("source") == "aws.cloudtrail" or (
+            isinstance(record.get("detail"), dict) and _is_cloudtrail_record(record["detail"])
+        ):
+            record = record.get("detail") or record  # EventBridge "AWS API Call via CloudTrail"
+        out.append(record)
+    return out
+
+
 def parse_cloudtrail(raw_text: str) -> list[LogEvent]:
-    """Parse a CloudTrail JSON export. Returns list of LogEvent."""
-    try:
-        data = json.loads(raw_text)
-    except json.JSONDecodeError as exc:
-        raise ValueError(f"CloudTrail parser: invalid JSON — {exc}") from exc
-
-    if not isinstance(data, dict) or "Records" not in data:
-        raise ValueError("CloudTrail parser: expected {\"Records\": [...]} object")
-
-    records: list[dict[str, Any]] = data["Records"]
+    records = _records(raw_text)
     events: list[LogEvent] = []
     for record in records:
         if event := _parse_record(record):
@@ -109,26 +127,13 @@ def parse_cloudtrail(raw_text: str) -> list[LogEvent]:
 
 
 class CloudTrailParser(BaseParser):
-    """Plugin-registry entry for AWS CloudTrail logs."""
 
     format_name = "cloudtrail"
 
     @classmethod
     def can_parse(cls, content: str, filename: str) -> bool:
-        stripped = content.strip()
-        if not stripped.startswith("{"):
-            return False
-        try:
-            data = json.loads(stripped)
-            if not isinstance(data, dict):
-                return False
-            records = data.get("Records")
-            if not isinstance(records, list) or not records:
-                return False
-            first = records[0] if isinstance(records[0], dict) else {}
-            return "eventSource" in first and "eventName" in first
-        except (json.JSONDecodeError, IndexError):
-            return False
+        head = _records(content)[:5]
+        return bool(head) and sum(_is_cloudtrail_record(r) for r in head) * 2 > len(head)
 
     @classmethod
     def parse(cls, content: str, filename: str = "") -> list[LogEvent]:

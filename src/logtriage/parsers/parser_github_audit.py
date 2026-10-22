@@ -23,6 +23,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Any
 
+from logtriage.parsers import json_input
 from logtriage.parsers.base_parser import BaseParser
 from logtriage.models import LogEvent, LogFormat
 
@@ -103,61 +104,11 @@ class GitHubAuditParser(BaseParser):
 
     @classmethod
     def can_parse(cls, content: str, filename: str) -> bool:
-        if filename and "github" in filename.lower():
-            return True
-        stripped = content.strip()
-        if not stripped.startswith("{") and not stripped.startswith("["):
-            return False
-        try:
-            data = json.loads(stripped)
-            if isinstance(data, list) and data:
-                return _is_github_event(data[0])
-            if isinstance(data, dict):
-                return _is_github_event(data)
-        except json.JSONDecodeError:
-            pass
-        for line in stripped.splitlines():
-            line = line.strip()
-            if not line:
-                continue
-            if not line.startswith("{"):
-                return False
-            try:
-                return _is_github_event(json.loads(line))
-            except json.JSONDecodeError:
-                return False
-        return False
+        head = json_input.sample(content)
+        return bool(head) and sum(_is_github_event(r) for r in head) * 2 > len(head)
 
     @classmethod
     def parse(cls, content: str, filename: str = "") -> list[LogEvent]:
-        events: list[LogEvent] = []
-        stripped = content.strip()
-
-        try:
-            data = json.loads(stripped)
-            if isinstance(data, list):
-                for obj in data:
-                    if ev := _event_to_log(obj):
-                        events.append(ev)
-                logger.info("GitHub audit parser: %d events", len(events))
-                return events
-            if _is_github_event(data):
-                if ev := _event_to_log(data):
-                    events.append(ev)
-                return events
-        except json.JSONDecodeError:
-            pass
-
-        for line in stripped.splitlines():
-            line = line.strip()
-            if not line or not line.startswith("{"):
-                continue
-            try:
-                obj = json.loads(line)
-                if ev := _event_to_log(obj):
-                    events.append(ev)
-            except json.JSONDecodeError:
-                continue
-
-        logger.info("GitHub audit parser: %d events (NDJSON)", len(events))
+        events = [ev for obj in json_input.records(content) if (ev := _event_to_log(obj))]
+        logger.info("GitHub audit parser: %d events", len(events))
         return events

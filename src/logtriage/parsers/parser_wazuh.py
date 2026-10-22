@@ -22,6 +22,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Any
 
+from logtriage.parsers import json_input
 from logtriage.parsers.base_parser import BaseParser
 from logtriage.models import LogEvent, LogFormat
 
@@ -92,43 +93,16 @@ def _looks_like_ip(s: str) -> bool:
         return False
 
 
+# Wazuh API responses: {"data": {"affected_items": [...]}}; archives: {"alerts": [...]}
+_ENVELOPES = ("alerts", "data.affected_items")
+
+
 def parse_wazuh(raw_text: str) -> list[LogEvent]:
     events: list[LogEvent] = []
-    stripped = raw_text.strip()
-
-    # Envelope: {"alerts": [...]}
-    if stripped.startswith("{"):
-        try:
-            data = json.loads(stripped)
-            if isinstance(data, dict):
-                alerts = data.get("alerts") or data.get("data", {}).get("affected_items")
-                if isinstance(alerts, list):
-                    for a in alerts:
-                        if e := _alert_to_log(a):
-                            events.append(e)
-                    logger.info("Wazuh parser: %d alerts from envelope", len(events))
-                    return events
-                # Single alert object
-                if "rule" in data and "agent" in data:
-                    if e := _alert_to_log(data):
-                        events.append(e)
-                    return events
-        except json.JSONDecodeError:
-            pass
-
-    # NDJSON
-    for line in stripped.splitlines():
-        line = line.strip()
-        if not line or not line.startswith("{"):
-            continue
-        try:
-            obj = json.loads(line)
-            if e := _alert_to_log(obj):
-                events.append(e)
-        except json.JSONDecodeError:
-            continue
-
-    logger.info("Wazuh parser: %d alerts from NDJSON", len(events))
+    for obj in json_input.records(raw_text, _ENVELOPES):
+        if e := _alert_to_log(obj):
+            events.append(e)
+    logger.info("Wazuh parser: %d alerts", len(events))
     return events
 
 
@@ -149,32 +123,8 @@ class WazuhParser(BaseParser):
 
     @classmethod
     def can_parse(cls, content: str, filename: str) -> bool:
-        if filename and "wazuh" in filename.lower():
-            return True
-        stripped = content.strip()
-        # Envelope check
-        if stripped.startswith("{"):
-            try:
-                data = json.loads(stripped)
-                if isinstance(data, dict):
-                    alerts = data.get("alerts")
-                    if isinstance(alerts, list) and alerts:
-                        return _is_wazuh(alerts[0])
-                    return _is_wazuh(data)
-            except json.JSONDecodeError:
-                pass
-        # NDJSON
-        for line in stripped.splitlines():
-            line = line.strip()
-            if not line:
-                continue
-            if not line.startswith("{"):
-                return False
-            try:
-                return _is_wazuh(json.loads(line))
-            except json.JSONDecodeError:
-                return False
-        return False
+        head = json_input.sample(content, _ENVELOPES, n=1)
+        return bool(head) and _is_wazuh(head[0])
 
     @classmethod
     def parse(cls, content: str, filename: str = "") -> list[LogEvent]:

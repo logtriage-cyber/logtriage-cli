@@ -25,6 +25,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Any
 
+from logtriage.parsers import json_input
 from logtriage.parsers.base_parser import BaseParser
 from logtriage.models import LogEvent, LogFormat
 
@@ -128,43 +129,13 @@ class GoogleWorkspaceParser(BaseParser):
 
     @classmethod
     def can_parse(cls, content: str, filename: str) -> bool:
-        if filename:
-            fn = filename.lower()
-            if "google" in fn or "workspace" in fn or "gsuite" in fn:
-                return True
-        stripped = content.strip()
-        if not stripped.startswith("{") and not stripped.startswith("["):
-            return False
-        try:
-            data = json.loads(stripped)
-            if isinstance(data, dict):
-                if data.get("kind", "").startswith("admin#reports"):
-                    return True
-                items = data.get("items")
-                if isinstance(items, list) and items:
-                    return _is_workspace_item(items[0])
-            if isinstance(data, list) and data:
-                return _is_workspace_item(data[0])
-        except json.JSONDecodeError:
-            pass
-        return False
+        head = json_input.sample(content, ("items",))
+        return bool(head) and sum(_is_workspace_item(r) for r in head) * 2 > len(head)
 
     @classmethod
     def parse(cls, content: str, filename: str = "") -> list[LogEvent]:
         events: list[LogEvent] = []
-        stripped = content.strip()
-        try:
-            data = json.loads(stripped)
-            items: list[Any] = []
-            if isinstance(data, dict):
-                items = data.get("items", [])
-                if not items and _is_workspace_item(data):
-                    items = [data]
-            elif isinstance(data, list):
-                items = data
-            for item in items:
-                events.extend(_activity_to_logs(item))
-        except json.JSONDecodeError:
-            pass
+        for item in json_input.records(content, ("items",)):
+            events.extend(_activity_to_logs(item))
         logger.info("Google Workspace parser: %d events", len(events))
         return events

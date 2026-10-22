@@ -132,16 +132,18 @@ class FortiGateParser(BaseParser):
 
     @classmethod
     def can_parse(cls, content: str, filename: str) -> bool:
-        if filename and any(s in filename.lower() for s in ("fortigate", "fortinet", "fortifw")):
-            pass
         count = 0
         for line in content.splitlines():
             stripped = _SYSLOG_PREFIX_RE.sub("", line.strip(), count=1)
             if not stripped:
                 continue
             kv = _parse_kv(stripped)
-            if kv.get("devid", "").startswith(("FG", "FW")) or (
+            if kv.get("devid", "").startswith(("FG", "FW", "FP")) or (
                 "devname" in kv and "logid" in kv and ("srcip" in kv or "action" in kv)
+            ) or (
+                # FortiOS Log Message Reference samples (and FortiAnalyzer downloads) leave
+                # out devname/devid: a 10-digit logid with type and subtype identifies them.
+                len(kv.get("logid", "")) == 10 and kv["logid"].isdigit() and "type" in kv and "subtype" in kv
             ):
                 return True
             count += 1

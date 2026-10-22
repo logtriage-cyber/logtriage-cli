@@ -161,10 +161,6 @@ class MysqlParser(BaseParser):
 
     @classmethod
     def can_parse(cls, content: str, filename: str) -> bool:
-        if filename:
-            fn = filename.lower()
-            if "mysql" in fn or "slow" in fn and fn.endswith(".log"):
-                return True
         for line in content.splitlines()[:30]:
             stripped = line.strip()
             if _SLOW_USER_RE.match(stripped) or _SLOW_TIME_RE.match(stripped):

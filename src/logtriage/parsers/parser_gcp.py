@@ -20,11 +20,11 @@ Key fields mapped:
 """
 from __future__ import annotations
 
-import json
 import logging
 from datetime import datetime, timezone
 from typing import Any
 
+from logtriage.parsers import json_input
 from logtriage.parsers.base_parser import BaseParser
 from logtriage.models import LogEvent, LogFormat
 
@@ -134,32 +134,20 @@ def _parse_entry(raw: dict[str, Any]) -> LogEvent | None:
         return None
 
 
+def _is_gcp_audit(record: dict[str, Any]) -> bool:
+    payload = record.get("protoPayload")
+    if isinstance(payload, dict) and (
+        "AuditLog" in str(payload.get("@type", ""))
+        or ("authenticationInfo" in payload and "requestMetadata" in payload)
+    ):
+        return True
+    return "cloudaudit.googleapis.com" in str(record.get("logName", ""))
+
+
 def parse_gcp_audit(content: str) -> list[LogEvent]:
-    """Parse GCP Cloud Audit Log JSON/NDJSON into LogEvents."""
-    records: list[dict[str, Any]] = []
-    stripped = content.strip()
-
-    if stripped.startswith("{"):
-        for line in stripped.splitlines():
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                obj = json.loads(line)
-                if isinstance(obj, dict):
-                    records.append(obj)
-            except json.JSONDecodeError:
-                pass
-    else:
-        try:
-            data = json.loads(stripped)
-            if isinstance(data, list):
-                records = [r for r in data if isinstance(r, dict)]
-            elif isinstance(data, dict):
-                records = data.get("entries") or [data]
-        except json.JSONDecodeError as exc:
-            raise ValueError(f"GCP audit parser: invalid JSON — {exc}") from exc
-
+    """Parse GCP Cloud Audit Log entries (`gcloud logging read --format=json`, the
+    entries.list API's {"entries": [...]}, NDJSON exports) into LogEvents."""
+    records = json_input.records(content, ("entries",))
     result = [e for e in (_parse_entry(r) for r in records) if e is not None]
     logger.info("GCP audit parser: %d/%d events parsed", len(result), len(records))
     return result
@@ -170,19 +158,8 @@ class GcpAuditParser(BaseParser):
 
     @classmethod
     def can_parse(cls, content: str, filename: str) -> bool:
-        if any(x in filename.lower() for x in ("gcp", "gcloud", "cloudaudit")):
-            stripped = content.strip()
-            if stripped.startswith("{") or stripped.startswith("["):
-                return True
-        head = content.strip()[:3000]
-        return (
-            '"protoPayload"' in head and '"AuditLog"' in head
-        ) or (
-            '"protoPayload"' in head and '"authenticationInfo"' in head
-            and '"requestMetadata"' in head
-        ) or (
-            '"logName"' in head and "cloudaudit.googleapis.com" in head
-        )
+        head = json_input.sample(content, ("entries",))
+        return bool(head) and sum(_is_gcp_audit(r) for r in head) * 2 > len(head)
 
     @classmethod
     def parse(cls, content: str, filename: str = "") -> list[LogEvent]:

@@ -36,21 +36,21 @@ Detection priority (most specific first):
   30. SentinelOne     — JSON with threatInfo + agentDetectionInfo fields
   31. CarbonBlack     — JSON with type="ingress.event.*" or deviceInfo + eventAction
   32. MDATP           — JSON with MachineId+AlertId or DeviceId+ActionType (MDE)
-  33. CiscoAsa        — syslog lines containing %ASA-N-mnemonic: or %FTD-N-mnemonic:
-  34. PanOS           — PAN-OS native CSV with log type field (TRAFFIC/THREAT/AUTH/...)
-  35. FortiGate       — space-separated kv pairs with devid=FG... or devname= + logid=
-  36. F5Asm           — syslog kv lines with ip_client= and request_status=/attack_type=
-  37. JuniperSrx      — syslog lines with RT_FLOW_SESSION_* or NetScreen device_id=
-  38. HAProxy         — syslog lines with haproxy[pid]: and HTTP/TCP access log structure
-  39. Traefik         — NDJSON with RouterName + ServiceName + DownstreamStatus
-  40. IIS             — W3C text with #Fields: cs-method/sc-status/cs-uri-stem header
-  41. Syslog          — lines starting with <PRI> (RFC 5424 or RFC 3164)
-  42. AuthLog         — BSD syslog lines without <PRI>, or files named auth.log/secure
-  43. Zeek            — TSV starting with #separator header line
-  44. Snort           — text lines containing [**] [gid:sid:rev] pattern
-  45. MySQL           — slow query # User@Host: lines or mysqld error log timestamps
-  46. PostgreSQL      — CSV log with 23+ columns, log_time + error_severity
-  47. ECS             — NDJSON/JSON with @timestamp + ECS namespace objects (Elastic)
+  33. ECS             — JSON with @timestamp + an event object + another ECS namespace (Elastic)
+  34. CiscoAsa        — syslog lines containing %ASA-N-mnemonic: or %FTD-N-mnemonic:
+  35. PanOS           — PAN-OS native CSV with log type field (TRAFFIC/THREAT/AUTH/...)
+  36. FortiGate       — space-separated kv pairs with devid=FG... or devname= + logid=
+  37. F5Asm           — syslog kv lines with ip_client= and request_status=/attack_type=
+  38. JuniperSrx      — syslog lines with RT_FLOW_SESSION_* or NetScreen device_id=
+  39. HAProxy         — syslog lines with haproxy[pid]: and HTTP/TCP access log structure
+  40. Traefik         — NDJSON with RouterName + ServiceName + DownstreamStatus
+  41. IIS             — W3C text with #Fields: cs-method/sc-status/cs-uri-stem header
+  42. Syslog          — lines starting with <PRI> (RFC 5424 or RFC 3164)
+  43. AuthLog         — BSD syslog lines without <PRI>, or files named auth.log/secure
+  44. Zeek            — TSV starting with #separator header line
+  45. Snort           — text lines containing [**] [gid:sid:rev] pattern
+  46. MySQL           — slow query # User@Host: lines or mysqld error log timestamps
+  47. PostgreSQL      — CSV log with 23+ columns, log_time + error_severity
   48. GenericCSV      — .csv extension or comma-separated header
   49. GenericJSON     — JSON array, object, or NDJSON
   50. Nginx           — catch-all for unrecognised text/log files
@@ -58,7 +58,9 @@ Detection priority (most specific first):
 from __future__ import annotations
 
 import logging
+import re
 
+from logtriage.parsers import json_input
 from logtriage.parsers.base_parser import BaseParser
 from logtriage.models import LogEvent
 
@@ -153,6 +155,7 @@ def _build_registry() -> list[type[BaseParser]]:
         SentinelOneParser,
         CarbonBlackParser,
         MdatpParser,
+        EcsParser,
         CiscoAsaParser,
         PanosParser,
         FortiGateParser,
@@ -167,29 +170,84 @@ def _build_registry() -> list[type[BaseParser]]:
         SnortParser,
         MysqlParser,
         PostgresqlParser,
-        EcsParser,
         GenericCsvParser,
         GenericJsonParser,
         NginxParser,
     ]
 
 
+# A grep file-name prefix, then ":" and optionally "line:" (grep -n). The last path segment
+# must contain a letter (auth.log.1, /var/log/secure) — "01/15-14:32:01" (Snort) or
+# "15/Jan/2024:10:00" are times, not files — and the whole must contain a dot or slash.
+_GREP_PREFIX_RE = re.compile(
+    r"""^((?:[^\s:"'{}\[\]<>/]*/)*[^\s:"'{}\[\]<>/]*[A-Za-z][^\s:"'{}\[\]<>/]*):(?:\d+:)?(?=.)"""
+)
+
+
+def strip_grep_prefix(content: str) -> str | None:
+    """`grep -H` output (grep over several files) → the original lines.
+
+    Only when nearly every line carries a prefix and the prefixes are a few distinct
+    names (files), not per-line values such as addresses. The free analyzer applies
+    the same rule (stripGrepPrefix in marketing/src/lib/analyzer/index.mjs).
+    """
+    sample = [line for line in content[: 1 << 20].splitlines() if line.strip()][:20]
+    if len(sample) == 1:  # one line: only a one-line JSON document after the prefix
+        m = _GREP_PREFIX_RE.match(sample[0])
+        rest = sample[0][m.end():].lstrip() if m else ""
+        if not (m and ("." in m.group(1) or "/" in m.group(1)) and rest[:1] in ("[", "{")):
+            return None
+    elif not sample:
+        return None
+    prefixes = [
+        m.group(1) for line in sample if (m := _GREP_PREFIX_RE.match(line)) and ("." in m.group(1) or "/" in m.group(1))
+    ]
+    if len(prefixes) < 0.9 * len(sample) or len(set(prefixes)) > max(3, len(sample) / 4):
+        return None
+    return "\n".join(_GREP_PREFIX_RE.sub("", line, count=1) for line in content.splitlines())
+
+
 def detect_and_parse(content: str, filename: str = "") -> tuple[list[LogEvent], str]:
     """
     Iterate the registry in priority order, calling can_parse() on each parser.
-    Returns (events, format_name) for the first matching parser.
+    Returns (events, format_name) from the first matching parser that reads events.
+
+    A parser that claims the file but raises or reads nothing passes it on to the
+    next parser that claims it: a wrong claim must cost the customer a format, not
+    the analysis (2026-10-20, a `grep -H` K8s audit export failed outright). When
+    every claimant reads nothing, the first one's empty result is returned; when
+    every claimant raised, its error is.
     Raises ValueError if no parser matches.
     """
     global _REGISTRY
     if not _REGISTRY:
         _REGISTRY = _build_registry()
 
-    for parser_cls in _REGISTRY:
-        if parser_cls.can_parse(content, filename):
-            logger.info(
-                "Detected format: %s (filename=%r)", parser_cls.format_name, filename
-            )
-            return parser_cls.parse(content, filename), parser_cls.format_name
+    content = strip_grep_prefix(content) or content
+    empty: tuple[list[LogEvent], str] | None = None
+    first_error: Exception | None = None
+    try:
+        for parser_cls in _REGISTRY:
+            if not parser_cls.can_parse(content, filename):
+                continue
+            logger.info("Detected format: %s (filename=%r)", parser_cls.format_name, filename)
+            try:
+                events = parser_cls.parse(content, filename)
+            except Exception as exc:  # any parser bug falls through to the next claimant
+                logger.warning("%s parser failed on %r, trying the next parser: %s", parser_cls.format_name, filename, exc)
+                first_error = first_error or exc
+                continue
+            if events:
+                return events, parser_cls.format_name
+            logger.warning("%s parser read no events from %r, trying the next parser", parser_cls.format_name, filename)
+            empty = empty or (events, parser_cls.format_name)
+    finally:
+        json_input.release()
+
+    if empty is not None:
+        return empty
+    if first_error is not None:
+        raise first_error
 
     raise ValueError(
         f"No parser could handle file {filename!r}. "

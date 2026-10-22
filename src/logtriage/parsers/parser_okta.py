@@ -22,11 +22,11 @@ Key fields mapped:
 """
 from __future__ import annotations
 
-import json
 import logging
 from datetime import datetime, timezone
 from typing import Any
 
+from logtriage.parsers import json_input
 from logtriage.parsers.base_parser import BaseParser
 from logtriage.models import LocationDetail, LogEvent, LogFormat
 
@@ -142,27 +142,20 @@ def _parse_event(raw: dict[str, Any]) -> LogEvent | None:
         return None
 
 
+# System Log API: a bare array; event hooks: {"data": {"events": [...]}}
+_ENVELOPES = ("data.events", "logs", "value", "events")
+
+
+def _is_okta(record: dict[str, Any]) -> bool:
+    return ("eventType" in record and "actor" in record and "outcome" in record) or (
+        "displayMessage" in record and "published" in record and "securityContext" in record
+    )
+
+
 def parse_okta(content: str) -> list[LogEvent]:
     """Parse Okta System Log JSON into LogEvents."""
-    try:
-        data = json.loads(content)
-    except json.JSONDecodeError as exc:
-        raise ValueError(f"Okta parser: invalid JSON — {exc}") from exc
-
-    if isinstance(data, dict):
-        records = data.get("logs") or data.get("value") or data.get("events") or []
-    elif isinstance(data, list):
-        records = data
-    else:
-        raise ValueError("Okta parser: expected JSON array or object")
-
-    events: list[LogEvent] = []
-    for rec in records:
-        if isinstance(rec, dict):
-            ev = _parse_event(rec)
-            if ev:
-                events.append(ev)
-
+    records = json_input.records(content, _ENVELOPES)
+    events = [ev for rec in records if (ev := _parse_event(rec))]
     logger.info("Okta parser: %d/%d events parsed", len(events), len(records))
     return events
 
@@ -172,17 +165,8 @@ class OktaParser(BaseParser):
 
     @classmethod
     def can_parse(cls, content: str, filename: str) -> bool:
-        if "okta" in filename.lower():
-            stripped = content.strip()
-            return stripped.startswith("[") or stripped.startswith("{")
-        head = content.strip()[:3000]
-        if not (head.startswith("[") or head.startswith("{")):
-            return False
-        return (
-            '"eventType"' in head and '"actor"' in head and '"outcome"' in head
-        ) or (
-            '"displayMessage"' in head and '"published"' in head and '"securityContext"' in head
-        )
+        head = json_input.sample(content, _ENVELOPES)
+        return bool(head) and sum(_is_okta(r) for r in head) * 2 > len(head)
 
     @classmethod
     def parse(cls, content: str, filename: str = "") -> list[LogEvent]:

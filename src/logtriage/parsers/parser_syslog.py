@@ -31,11 +31,13 @@ _RFC5424_RE = re.compile(
 )
 
 # RFC 3164: <PRI>Mon DD HH:MM:SS hostname tag[pid]: message
+# The TAG ("sshd[123]:") is optional: RFC 3164's own examples include
+# "<13>Feb  5 17:32:18 10.0.0.99 Use the BFG!", which has none.
 _RFC3164_RE = re.compile(
     r"^<(\d+)>"
     r"(\w{3}\s+\d{1,2}\s+\d{2}:\d{2}:\d{2})\s+"
     r"(\S+)\s+"
-    r"(\S+?)(?:\[(\d+)\])?:\s*"
+    r"(?:([\w./-]{1,48}?)(?:\[(\d+)\])?:\s*)?"
     r"(.*)",
 )
 
@@ -140,7 +142,7 @@ def _parse_3164_line(line: str) -> LogEvent | None:
         timestamp=_parse_3164_ts(ts_raw),
         ip_address=_extract_ip(msg),
         user_principal_name=_extract_user(msg),
-        path=f"{tag}: {msg[:120]}",
+        path=f"{tag}: {msg[:120]}" if tag else msg[:120],
         status_code=status,
         resource_display_name=hostname,
         raw_line=line,

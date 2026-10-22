@@ -22,6 +22,7 @@ import re
 from datetime import datetime, timezone
 from typing import Any
 
+from logtriage.parsers import json_input
 from logtriage.parsers.base_parser import BaseParser
 from logtriage.models import LogEvent, LogFormat
 
@@ -120,11 +121,14 @@ def _clf_to_log(line: str) -> LogEvent | None:
 
 
 def _is_traefik_json(obj: Any) -> bool:
-    return (
-        isinstance(obj, dict)
-        and ("RouterName" in obj or "router_name" in obj or "ServiceName" in obj)
-        and ("DownstreamStatus" in obj or "downstream_status" in obj or "RequestPath" in obj)
+    if not isinstance(obj, dict):
+        return False
+    routed = ("RouterName" in obj or "router_name" in obj or "ServiceName" in obj) and (
+        "DownstreamStatus" in obj or "downstream_status" in obj or "RequestPath" in obj
     )
+    # Requests no router matched (404s, scanners) carry no RouterName/ServiceName
+    unrouted = "DownstreamStatus" in obj and "RequestPath" in obj and ("ClientHost" in obj or "ClientAddr" in obj)
+    return routed or unrouted
 
 
 class TraefikParser(BaseParser):
@@ -132,37 +136,16 @@ class TraefikParser(BaseParser):
 
     @classmethod
     def can_parse(cls, content: str, filename: str) -> bool:
-        if filename and "traefik" in filename.lower():
-            return True
-        stripped = content.strip()
-        # JSON mode
-        for line in stripped.splitlines()[:5]:
-            line = line.strip()
-            if not line or not line.startswith("{"):
-                break
-            try:
-                if _is_traefik_json(json.loads(line)):
-                    return True
-            except json.JSONDecodeError:
-                break
-        return False
+        head = json_input.sample(content)
+        return bool(head) and sum(_is_traefik_json(r) for r in head) * 2 > len(head)
 
     @classmethod
     def parse(cls, content: str, filename: str = "") -> list[LogEvent]:
         events: list[LogEvent] = []
-        for line in content.splitlines():
-            line = line.strip()
-            if not line:
-                continue
-            if line.startswith("{"):
-                try:
-                    obj = json.loads(line)
-                    if ev := _json_to_log(obj):
-                        events.append(ev)
-                    continue
-                except json.JSONDecodeError:
-                    pass
-            if ev := _clf_to_log(line):
-                events.append(ev)
+        records = json_input.records(content)
+        if records:
+            events = [ev for obj in records if (ev := _json_to_log(obj))]
+        else:  # Common Log Format access log
+            events = [ev for line in content.splitlines() if line.strip() and (ev := _clf_to_log(line.strip()))]
         logger.info("Traefik parser: %d events", len(events))
         return events

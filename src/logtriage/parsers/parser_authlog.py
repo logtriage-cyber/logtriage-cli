@@ -181,11 +181,6 @@ class AuthLogParser(BaseParser):
 
     @classmethod
     def can_parse(cls, content: str, filename: str) -> bool:
-        # filename hint
-        fname = filename.lower()
-        if any(fname.endswith(suf) for suf in ("auth.log", "secure", "auth.log.1")):
-            return True
-
         # Content: must look like BSD syslog WITHOUT <NNN> priority prefix
         # (SyslogParser takes lines that start with <NNN>)
         hits = 0

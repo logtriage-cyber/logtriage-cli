@@ -150,8 +150,6 @@ class JuniperSrxParser(BaseParser):
 
     @classmethod
     def can_parse(cls, content: str, filename: str) -> bool:
-        if filename and any(s in filename.lower() for s in ("srx", "juniper", "screenos", "netscreen")):
-            pass
         count = 0
         for line in content.splitlines():
             if not line.strip():

@@ -25,6 +25,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Any
 
+from logtriage.parsers import json_input
 from logtriage.parsers.base_parser import BaseParser
 from logtriage.models import LogEvent, LogFormat
 
@@ -111,72 +112,29 @@ def _is_asff(obj: Any) -> bool:
     )
 
 
+def _findings(content: str) -> list[dict[str, Any]]:
+    """ASFF findings from `get-findings` ({"Findings": [...]}), NDJSON, and EventBridge
+    events ({"source": "aws.securityhub", "detail": {"findings": [...]}})."""
+    out: list[dict[str, Any]] = []
+    for record in json_input.records(content, ("Findings", "findings")):
+        detail = record.get("detail")
+        if isinstance(detail, dict) and isinstance(detail.get("findings"), list):
+            out.extend(f for f in detail["findings"] if isinstance(f, dict))
+        else:
+            out.append(record)
+    return out
+
+
 class AwsSecurityHubParser(BaseParser):
     format_name = "aws_securityhub"
 
     @classmethod
     def can_parse(cls, content: str, filename: str) -> bool:
-        if filename and "securityhub" in filename.lower().replace("-", "").replace("_", ""):
-            return True
-        stripped = content.strip()
-        if stripped.startswith("{"):
-            try:
-                data = json.loads(stripped)
-                if isinstance(data, dict):
-                    findings = data.get("Findings") or data.get("findings")
-                    if isinstance(findings, list) and findings:
-                        return _is_asff(findings[0])
-                    return _is_asff(data)
-            except json.JSONDecodeError:
-                pass
-        # NDJSON
-        for line in stripped.splitlines():
-            line = line.strip()
-            if not line:
-                continue
-            if not line.startswith("{"):
-                return False
-            try:
-                return _is_asff(json.loads(line))
-            except json.JSONDecodeError:
-                return False
-        return False
+        head = _findings(content)[:5]
+        return bool(head) and sum(_is_asff(f) for f in head) * 2 > len(head)
 
     @classmethod
     def parse(cls, content: str, filename: str = "") -> list[LogEvent]:
-        events: list[LogEvent] = []
-        stripped = content.strip()
-
-        def _from_list(findings: list[Any]) -> None:
-            for f in findings:
-                if ev := _finding_to_log(f):
-                    events.append(ev)
-
-        if stripped.startswith("{"):
-            try:
-                data = json.loads(stripped)
-                findings = data.get("Findings") or data.get("findings") if isinstance(data, dict) else None
-                if isinstance(findings, list):
-                    _from_list(findings)
-                    logger.info("SecurityHub parser: %d findings", len(events))
-                    return events
-                if _is_asff(data):
-                    if ev := _finding_to_log(data):
-                        events.append(ev)
-                    return events
-            except json.JSONDecodeError:
-                pass
-
-        for line in stripped.splitlines():
-            line = line.strip()
-            if not line or not line.startswith("{"):
-                continue
-            try:
-                obj = json.loads(line)
-                if ev := _finding_to_log(obj):
-                    events.append(ev)
-            except json.JSONDecodeError:
-                continue
-
-        logger.info("SecurityHub parser: %d findings (NDJSON)", len(events))
+        events = [ev for f in _findings(content) if (ev := _finding_to_log(f))]
+        logger.info("SecurityHub parser: %d findings", len(events))
         return events

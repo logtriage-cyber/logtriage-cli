@@ -2,11 +2,11 @@
 # overwritten on the next sync; see 'Contributing' in README.md.
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Any
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class LogFormat(str, Enum):
@@ -129,6 +129,13 @@ class LogEvent(BaseModel):
 
     # File hash extracted by parser (P14 — CEF fileHash / EVTX 4688 Hashes)
     file_hash: str | None = None  # SHA256 (64 hex chars) or MD5 (32 hex chars)
+
+    @field_validator("timestamp")
+    @classmethod
+    def _aware_timestamp(cls, value: datetime) -> datetime:
+        # A source that writes no offset (M365 CreationTime, many CSV exports) means UTC;
+        # naive and aware datetimes cannot be compared, so none may leave a parser.
+        return value.replace(tzinfo=timezone.utc) if value is not None and value.tzinfo is None else value
 
     @model_validator(mode="after")
     def _require_timestamp(self) -> "LogEvent":

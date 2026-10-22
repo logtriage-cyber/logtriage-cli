@@ -293,6 +293,10 @@ def parse_csv(raw_text: str) -> list[LogEvent]:
     return events
 
 
+# Common/Combined Log Format: client ident user [time] "request"
+_CLF_PREFIX = re.compile(r'^\S+ \S+ \S+ \[[^\]]+\] "')
+
+
 class GenericCsvParser(BaseParser):
     """Plugin-registry entry for generic CSV logs."""
 
@@ -300,18 +304,17 @@ class GenericCsvParser(BaseParser):
 
     @classmethod
     def can_parse(cls, content: str, filename: str) -> bool:
-        if filename.lower().endswith(".csv"):
-            return True
         stripped = content.strip()
         # CSV: first line has commas and does not start with a digit (nginx lines start with IP)
         # and does not look like JSON
         if stripped.startswith(("{", "[")):
             return False
-        lines = [line for line in stripped.splitlines() if line.strip()]
-        if lines:
-            first = lines[0]
-            return "," in first and not first[0].isdigit()
-        return False
+        first = next((line for line in stripped.splitlines() if line.strip()), "")
+        if not first or _CLF_PREFIX.match(first):
+            return False  # an access log saved as .csv (its user agents contain commas)
+        if filename.lower().endswith(".csv"):
+            return "," in first or ";" in first or "\t" in first
+        return "," in first and not first[0].isdigit()
 
     @classmethod
     def parse(cls, content: str, filename: str = "") -> list[LogEvent]:

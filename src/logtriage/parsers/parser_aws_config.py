@@ -4,9 +4,10 @@
 AWS Config change event parser.
 
 Accepts:
-  - {"configurationItems": [...]} — bulk history export
-  - {"configurationItem": {...}}  — SNS / EventBridge single change
-  - NDJSON — one configurationItem per line
+  - {"configurationItems": [...]} — history / snapshot files, get-resource-config-history
+  - SNS notifications ({"Type": "Notification", "Message": "<JSON>"}), raw or as delivered
+  - EventBridge events ({"source": "aws.config", "detail": {"configurationItem": {...}}})
+  - {"configurationItem": {...}} and bare items, as a document, an array or NDJSON
 
 Key fields: resourceType, resourceId, configurationItemStatus, awsAccountId,
 configurationItemCaptureTime, changeType, configuration.
@@ -26,6 +27,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Any
 
+from logtriage.parsers import json_input
 from logtriage.parsers.base_parser import BaseParser
 from logtriage.models import LogEvent, LogFormat
 
@@ -85,83 +87,47 @@ def _is_config_item(obj: Any) -> bool:
     )
 
 
+def _unwrap(record: dict[str, Any]) -> list[dict[str, Any]]:
+    """The configuration items a delivered record carries.
+
+    SNS notifications hold the change as a JSON string in "Message" (shown as an
+    object in AWS's own examples, which also show "configurationItem" as a list);
+    EventBridge events hold it in "detail"; history and snapshot files, and the
+    CLI, list items under "configurationItems".
+    """
+    message = record.get("Message")
+    if isinstance(message, str) and message.lstrip().startswith("{"):
+        try:
+            message = json.loads(message)
+        except ValueError:
+            message = None
+    if isinstance(message, dict):
+        record = message
+    elif record.get("source") == "aws.config" and isinstance(record.get("detail"), dict):
+        record = record["detail"]
+    for key in ("configurationItems", "configurationItem"):
+        inner = record.get(key)
+        if isinstance(inner, list):
+            return [i for i in inner if isinstance(i, dict)]
+        if isinstance(inner, dict):
+            return [inner]
+    return [record] if _is_config_item(record) else []
+
+
+def _items(content: str) -> list[dict[str, Any]]:
+    return [item for record in json_input.records(content) for item in _unwrap(record)]
+
+
 class AwsConfigParser(BaseParser):
     format_name = "aws_config"
 
     @classmethod
     def can_parse(cls, content: str, filename: str) -> bool:
-        if filename and "config" in filename.lower() and "aws" in filename.lower():
-            return True
-        stripped = content.strip()
-        if not stripped.startswith("{") and not stripped.startswith("["):
-            return False
-        try:
-            data = json.loads(stripped)
-            if isinstance(data, dict):
-                # Bulk export
-                items = data.get("configurationItems")
-                if isinstance(items, list) and items:
-                    return _is_config_item(items[0])
-                # SNS single
-                item = data.get("configurationItem")
-                if isinstance(item, dict):
-                    return _is_config_item(item)
-                return _is_config_item(data)
-        except json.JSONDecodeError:
-            pass
-        # NDJSON
-        for line in stripped.splitlines():
-            line = line.strip()
-            if not line:
-                continue
-            if not line.startswith("{"):
-                return False
-            try:
-                return _is_config_item(json.loads(line))
-            except json.JSONDecodeError:
-                return False
-        return False
+        head = _items(content)[:5]
+        return bool(head) and sum(_is_config_item(i) for i in head) * 2 > len(head)
 
     @classmethod
     def parse(cls, content: str, filename: str = "") -> list[LogEvent]:
-        events: list[LogEvent] = []
-        stripped = content.strip()
-
-        def _from_list(items: list[Any]) -> None:
-            for item in items:
-                if ev := _item_to_log(item):
-                    events.append(ev)
-
-        try:
-            data = json.loads(stripped)
-            if isinstance(data, dict):
-                items = data.get("configurationItems")
-                if isinstance(items, list):
-                    _from_list(items)
-                    logger.info("Config parser: %d items", len(events))
-                    return events
-                item = data.get("configurationItem")
-                if isinstance(item, dict):
-                    if ev := _item_to_log(item):
-                        events.append(ev)
-                    return events
-                if _is_config_item(data):
-                    if ev := _item_to_log(data):
-                        events.append(ev)
-                    return events
-        except json.JSONDecodeError:
-            pass
-
-        for line in stripped.splitlines():
-            line = line.strip()
-            if not line or not line.startswith("{"):
-                continue
-            try:
-                obj = json.loads(line)
-                if ev := _item_to_log(obj):
-                    events.append(ev)
-            except json.JSONDecodeError:
-                continue
-
-        logger.info("Config parser: %d items (NDJSON)", len(events))
+        events = [ev for item in _items(content) if (ev := _item_to_log(item))]
+        logger.info("Config parser: %d items", len(events))
         return events

@@ -15,6 +15,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Any
 
+from logtriage.parsers import json_input
 from logtriage.models import (
     ConditionalAccessDetail,
     DeviceDetail,
@@ -125,39 +126,77 @@ def _parse_signin(record: dict[str, Any]) -> LogEvent | None:
         return None
 
 
-_AZURE_DISCRIMINATOR_FIELDS = {
-    "userPrincipalName",
-    "conditionalAccessStatus",
-    "appliedConditionalAccessPolicies",
-    "clientAppUsed",
-    "deviceDetail",
+# Log Analytics SigninLogs columns whose camelCase Graph name is not just the
+# first letter lowered; dynamic columns arrive as JSON strings in CSV/JSON exports.
+_LA_RENAMES = {
+    "IPAddress": "ipAddress",
+    "LocationDetails": "location",
+    "ConditionalAccessPolicies": "appliedConditionalAccessPolicies",
 }
+_LA_DYNAMIC = frozenset({"deviceDetail", "location", "status", "mfaDetail", "appliedConditionalAccessPolicies"})
+
+
+def _json_value(value: Any) -> Any:
+    if isinstance(value, str) and value[:1] in ("{", "["):
+        try:
+            return json.loads(value)
+        except ValueError:
+            return value
+    return value
+
+
+def _normalize_record(record: dict[str, Any]) -> dict[str, Any]:
+    """Graph / portal sign-ins pass through; two other exports are mapped onto them.
+
+    - Diagnostic-settings archives (storage account, Event Hub): {"time", "category":
+      "SignInLogs" | "NonInteractiveUserSignInLogs" | …, "resultType", "properties": {…}}
+    - Log Analytics `SigninLogs` rows: PascalCase columns (UserPrincipalName, IPAddress,
+      ResultType, TimeGenerated, …), dynamic columns sometimes as JSON strings.
+    """
+    props = record.get("properties")
+    if isinstance(props, dict) and "signin" in str(record.get("category", "")).lower():
+        flat = dict(props)
+        flat.setdefault("createdDateTime", record.get("time"))
+        flat.setdefault("ipAddress", record.get("callerIpAddress"))
+        if "status" not in flat and record.get("resultType") is not None:
+            flat["status"] = {"errorCode": record.get("resultType"), "failureReason": record.get("resultDescription")}
+        return flat
+    if "UserPrincipalName" in record and "userPrincipalName" not in record:
+        flat = {}
+        for key, value in record.items():
+            name = _LA_RENAMES.get(key) or (key[:1].lower() + key[1:])
+            flat[name] = _json_value(value) if name in _LA_DYNAMIC else value
+        flat.setdefault("createdDateTime", record.get("TimeGenerated"))
+        if not isinstance(flat.get("status"), dict) and record.get("ResultType") is not None:
+            flat["status"] = {"errorCode": record.get("ResultType"), "failureReason": record.get("ResultDescription")}
+        return flat
+    return record
+
+
+def _is_signin(record: dict[str, Any]) -> bool:
+    """Same rule as the free analyzer's Entra module: a user plus a sign-in signal."""
+    if record.get("operationName") and record.get("caller"):
+        return False  # Azure Activity log
+    return "userPrincipalName" in record and any(
+        k in record for k in ("ipAddress", "createdDateTime", "status", "clientAppUsed")
+    )
+
+
+# Graph API: {"value": [...], "@odata.nextLink": ...}; diagnostic archives: {"records": [...]}
+_ENVELOPES = ("value", "records")
+
+
+def _records(raw_text: str) -> list[dict[str, Any]]:
+    return [_normalize_record(r) for r in json_input.records(raw_text, _ENVELOPES)]
 
 
 def parse_azure_signin(raw_text: str) -> list[LogEvent]:
     """
-    Parse an Azure Sign-In JSON export.
-
-    Accepts:
-      - Array of signIn objects: [{"id": "...", ...}, ...]
-      - Graph API wrapper: {"value": [...], "@odata.nextLink": "..."}
+    Parse an Entra ID (Azure AD) sign-in export: a Graph API response or portal
+    download (array or {"value": [...]}), NDJSON, a diagnostic-settings archive or
+    Log Analytics SigninLogs rows.
     """
-    try:
-        data = json.loads(raw_text)
-    except json.JSONDecodeError as exc:
-        raise ValueError(f"Azure Sign-In parser: invalid JSON — {exc}") from exc
-
-    # Unwrap Graph API envelope
-    records: list[dict[str, Any]]
-    if isinstance(data, list):
-        records = data
-    elif isinstance(data, dict) and "value" in data:
-        records = data["value"]
-    else:
-        raise ValueError(
-            "Azure Sign-In parser: expected a JSON array or {\"value\": [...]} object"
-        )
-
+    records = _records(raw_text)
     events: list[LogEvent] = []
     for record in records:
         if event := _parse_signin(record):
@@ -174,36 +213,8 @@ class AzureParser:
 
     @classmethod
     def can_parse(cls, content: str, filename: str) -> bool:
-        stripped = content.strip()
-        if not stripped.startswith(("{", "[")):
-            return False
-        try:
-            data = json.loads(stripped)
-            if isinstance(data, dict):
-                # CloudTrail uses "Records"; Azure uses "value"
-                if "value" in data and "Records" not in data:
-                    items = data["value"]
-                    if not items:
-                        return True
-                    return isinstance(items[0], dict) and bool(
-                        _AZURE_DISCRIMINATOR_FIELDS & set(items[0].keys())
-                    )
-                return False
-            if isinstance(data, list) and data and isinstance(data[0], dict):
-                return bool(_AZURE_DISCRIMINATOR_FIELDS & set(data[0].keys()))
-        except (json.JSONDecodeError, IndexError):
-            pass
-        # NDJSON — check first non-empty line
-        for line in stripped.splitlines():
-            if line.strip():
-                try:
-                    obj = json.loads(line)
-                    if isinstance(obj, dict):
-                        return bool(_AZURE_DISCRIMINATOR_FIELDS & set(obj.keys()))
-                except json.JSONDecodeError:
-                    pass
-                break
-        return False
+        head = [_normalize_record(r) for r in json_input.sample(content, _ENVELOPES)]
+        return bool(head) and sum(_is_signin(r) for r in head) * 2 > len(head)
 
     @classmethod
     def parse(cls, content: str, filename: str = "") -> list[LogEvent]:

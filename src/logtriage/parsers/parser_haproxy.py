@@ -111,8 +111,6 @@ class HaproxyParser(BaseParser):
 
     @classmethod
     def can_parse(cls, content: str, filename: str) -> bool:
-        if filename and "haproxy" in filename.lower():
-            return True
         for line in content.splitlines()[:20]:
             if _HAPROXY_RE.match(line.strip()):
                 return True

@@ -5,10 +5,14 @@ Microsoft Defender for Endpoint (MDE / MDATP) log parser.
 
 Supports two export schemas:
 
-1. Alert API format:
-   {"MachineId": "…", "ComputerDnsName": "…", "AlertId": "…",
-    "Severity": "High", "Category": "Malware", "Title": "…",
-    "MitreTechniques": ["T1059"], "EvidenceEntityType": "…", …}
+1. Alerts — the Alerts API (`GET /api/alerts`, camelCase):
+   {"id": "da637…", "machineId": "…", "computerDnsName": "…",
+    "severity": "High", "category": "Malware", "title": "…",
+    "alertCreationTime": "…", "mitreTechniques": ["T1059"],
+    "relatedUser": {"userName": "…", "domainName": "…"},
+    "evidence": [{"entityType": "File", "sha256": "…"}, …]}
+   and the older PascalCase exports (`AlertId`, `MachineId`, `AlertTime`, …).
+   Field names are matched case-insensitively.
 
 2. Advanced Hunting (DeviceEvents, DeviceProcessEvents, DeviceNetworkEvents,
    DeviceLogonEvents, DeviceAlertEvents) — flat JSON/NDJSON:
@@ -17,18 +21,20 @@ Supports two export schemas:
     "RemoteIP": "…", "AccountName": "…", "SHA256": "…", …}
 
 Discriminators:
-  Alert format:  `MachineId` + `AlertId`
+  Alert format:  `AlertId` + `MachineId`, or `id` + `machineId` + `alertCreationTime`
   Advanced Hunt: `DeviceId` + `ActionType` (or `ReportId`)
 
 References:
-  https://learn.microsoft.com/en-us/microsoft-365/security/defender-endpoint/
+  https://learn.microsoft.com/en-us/defender-endpoint/api/get-alerts
+  https://learn.microsoft.com/en-us/defender-endpoint/api/alerts
 """
 from __future__ import annotations
 
-import json
 import logging
 from datetime import datetime, timezone
+from typing import Any
 
+from logtriage.parsers import json_input
 from logtriage.parsers.base_parser import BaseParser
 from logtriage.models import LogEvent, LogFormat
 
@@ -53,26 +59,54 @@ def _parse_ts(raw: str | None) -> datetime:
         return datetime.now(timezone.utc)
 
 
-def _alert_to_log(obj: dict) -> LogEvent | None:
-    ts = _parse_ts(obj.get("AlertCreationTime") or obj.get("LastEventTime") or obj.get("FirstEventTime"))
-    ip = (
-        obj.get("RelatedIp")
-        or obj.get("EvidenceEntityValue") if obj.get("EvidenceEntityType") == "Ip" else None
-    ) or obj.get("LocalIpAddress")
+def _lower_keys(obj: dict[str, Any]) -> dict[str, Any]:
+    return {str(k).lower(): v for k, v in obj.items()}
 
-    hostname = obj.get("ComputerDnsName") or obj.get("DeviceName")
-    user = obj.get("LoggedOnUsers") or obj.get("RelatedUser")
+
+def _evidence(obj: dict[str, Any]) -> list[dict[str, Any]]:
+    items = obj.get("evidence")
+    return [_lower_keys(e) for e in items if isinstance(e, dict)] if isinstance(items, list) else []
+
+
+def _alert_to_log(raw: dict[str, Any]) -> LogEvent | None:
+    obj = _lower_keys(raw)
+    evidence = _evidence(obj)
+    ts = _parse_ts(
+        obj.get("alertcreationtime") or obj.get("alerttime")
+        or obj.get("lasteventtime") or obj.get("firsteventtime")
+    )
+    entity_ip = obj.get("evidenceentityvalue") if str(obj.get("evidenceentitytype", "")).lower() == "ip" else None
+    ip = (
+        obj.get("relatedip")
+        or entity_ip
+        or obj.get("ipaddress")
+        or next((e["ipaddress"] for e in evidence if e.get("ipaddress")), None)
+        or obj.get("localipaddress")
+    )
+
+    hostname = obj.get("computerdnsname") or obj.get("devicename") or obj.get("machinename")
+    user = (
+        next((e["userprincipalname"] for e in evidence if e.get("userprincipalname")), None)
+        or obj.get("loggedonusers") or obj.get("relateduser") or obj.get("username")
+    )
     if isinstance(user, list):
         user = user[0] if user else None
     if isinstance(user, dict):
-        user = user.get("UserName") or user.get("DomainAndUserName")
+        u = _lower_keys(user)
+        name = u.get("username")
+        user = u.get("domainandusername") or (
+            f"{u['domainname']}\\{name}" if name and u.get("domainname") else name
+        )
 
-    severity = obj.get("Severity", "")
+    severity = str(obj.get("severity") or "").capitalize()
     status = 403 if severity in _HIGH_SEVERITY else (401 if severity == "Medium" else 400)
 
-    title = obj.get("Title") or obj.get("Category") or "MDE/Alert"
-    sha256 = obj.get("Sha256") or obj.get("FileSha256")
-    file_hash = sha256 if sha256 and len(sha256) == 64 else None
+    title = obj.get("title") or obj.get("alerttitle") or obj.get("category") or "MDE/Alert"
+    sha256 = (
+        obj.get("sha256") or obj.get("filesha256")
+        or next((e["sha256"] for e in evidence if e.get("sha256")), None)
+    )
+    file_hash = sha256 if isinstance(sha256, str) and len(sha256) == 64 else None
 
     return LogEvent(
         source_format=LogFormat.MDATP,
@@ -119,51 +153,43 @@ def _hunt_to_log(obj: dict) -> LogEvent | None:
     )
 
 
+def _is_alert(obj: dict[str, Any]) -> bool:
+    keys = {str(k).lower(): v for k, v in obj.items()}
+    if keys.get("alertid") and (keys.get("machineid") or keys.get("deviceid") or keys.get("computerdnsname")):
+        return True
+    # Alerts API: "id" + "machineId" + its own creation timestamp
+    return bool(keys.get("id") and keys.get("machineid") and keys.get("alertcreationtime"))
+
+
 def _obj_to_log(obj: dict) -> LogEvent | None:
-    if obj.get("AlertId") and obj.get("MachineId"):
+    if _is_alert(obj):
         return _alert_to_log(obj)
     if obj.get("ActionType") and (obj.get("DeviceId") or obj.get("DeviceName")):
         return _hunt_to_log(obj)
     return None
 
 
+# Alerts API / Graph responses: {"value": [...]}; advanced hunting API: {"Schema": ..., "Results": [...]}
+_ENVELOPES = ("value", "Results", "results", "data", "alerts")
+
+
 def parse_mdatp(raw_text: str) -> list[LogEvent]:
     events: list[LogEvent] = []
-    for line in raw_text.splitlines():
-        line = line.strip()
-        if not line:
-            continue
+    for obj in json_input.records(raw_text, _ENVELOPES):
         try:
-            obj = json.loads(line)
-            if isinstance(obj, list):
-                for item in obj:
-                    if isinstance(item, dict):
-                        e = _obj_to_log(item)
-                        if e:
-                            events.append(e)
-            elif isinstance(obj, dict):
-                for key in ("data", "alerts", "results", "value"):
-                    inner = obj.get(key)
-                    if isinstance(inner, list):
-                        for item in inner:
-                            if isinstance(item, dict):
-                                e = _obj_to_log(item)
-                                if e:
-                                    events.append(e)
-                        break
-                else:
-                    e = _obj_to_log(obj)
-                    if e:
-                        events.append(e)
-        except (json.JSONDecodeError, Exception) as exc:
-            logger.debug("MDATP: skipping line: %s", exc)
+            e = _obj_to_log(obj)
+        except Exception as exc:
+            logger.debug("MDATP: skipping record: %s", exc)
+            continue
+        if e:
+            events.append(e)
     logger.info("MDATP parser: %d events", len(events))
     return events
 
 
 def _is_mdatp(obj: dict) -> bool:
     return (
-        (bool(obj.get("AlertId")) and bool(obj.get("MachineId"))) or
+        _is_alert(obj) or
         (bool(obj.get("ActionType")) and bool(obj.get("DeviceId") or obj.get("DeviceName")) and bool(obj.get("Timestamp"))) or
         (bool(obj.get("ReportId")) and bool(obj.get("DeviceName")))
     )
@@ -174,29 +200,8 @@ class MdatpParser(BaseParser):
 
     @classmethod
     def can_parse(cls, content: str, filename: str) -> bool:
-        if filename and any(s in filename.lower() for s in ("mdatp", "defender", "mde_", "atp_")):
-            pass
-        for line in content.splitlines():
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                obj = json.loads(line)
-                if isinstance(obj, dict):
-                    for key in ("data", "alerts", "results", "value"):
-                        inner = obj.get(key)
-                        if isinstance(inner, list) and inner and isinstance(inner[0], dict):
-                            obj = inner[0]
-                            break
-                    if _is_mdatp(obj):
-                        return True
-                elif isinstance(obj, list) and obj and isinstance(obj[0], dict):
-                    if _is_mdatp(obj[0]):
-                        return True
-            except (json.JSONDecodeError, Exception):
-                pass
-            return False
-        return False
+        head = json_input.sample(content, _ENVELOPES, n=1)
+        return bool(head) and _is_mdatp(head[0])
 
     @classmethod
     def parse(cls, content: str, filename: str = "") -> list[LogEvent]:

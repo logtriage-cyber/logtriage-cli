@@ -26,6 +26,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Any
 
+from logtriage.parsers import json_input
 from logtriage.parsers.base_parser import BaseParser
 from logtriage.models import LogEvent, LogFormat
 
@@ -117,59 +118,11 @@ class SlackAuditParser(BaseParser):
 
     @classmethod
     def can_parse(cls, content: str, filename: str) -> bool:
-        if filename and "slack" in filename.lower():
-            return True
-        stripped = content.strip()
-        if not stripped.startswith("{") and not stripped.startswith("["):
-            return False
-        try:
-            data = json.loads(stripped)
-            if isinstance(data, dict):
-                entries = data.get("entries")
-                if isinstance(entries, list) and entries:
-                    return _is_slack_entry(entries[0])
-                return _is_slack_entry(data)
-            if isinstance(data, list) and data:
-                return _is_slack_entry(data[0])
-        except json.JSONDecodeError:
-            pass
-        for line in stripped.splitlines():
-            line = line.strip()
-            if not line:
-                continue
-            if not line.startswith("{"):
-                return False
-            try:
-                return _is_slack_entry(json.loads(line))
-            except json.JSONDecodeError:
-                return False
-        return False
+        head = json_input.sample(content, ("entries",))
+        return bool(head) and sum(_is_slack_entry(r) for r in head) * 2 > len(head)
 
     @classmethod
     def parse(cls, content: str, filename: str = "") -> list[LogEvent]:
-        events: list[LogEvent] = []
-        stripped = content.strip()
-        try:
-            data = json.loads(stripped)
-            items: list[Any] = []
-            if isinstance(data, dict):
-                items = data.get("entries", []) or ([data] if _is_slack_entry(data) else [])
-            elif isinstance(data, list):
-                items = data
-            for obj in items:
-                if ev := _entry_to_log(obj):
-                    events.append(ev)
-        except json.JSONDecodeError:
-            for line in stripped.splitlines():
-                line = line.strip()
-                if not line or not line.startswith("{"):
-                    continue
-                try:
-                    obj = json.loads(line)
-                    if ev := _entry_to_log(obj):
-                        events.append(ev)
-                except json.JSONDecodeError:
-                    continue
-
+        events = [ev for obj in json_input.records(content, ("entries",)) if (ev := _entry_to_log(obj))]
         logger.info("Slack audit parser: %d events", len(events))
         return events

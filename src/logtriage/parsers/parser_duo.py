@@ -25,6 +25,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Any
 
+from logtriage.parsers import json_input
 from logtriage.parsers.base_parser import BaseParser
 from logtriage.models import LogEvent, LogFormat
 
@@ -93,7 +94,7 @@ def _admin_to_log(obj: dict[str, Any]) -> LogEvent | None:
     try:
         action = (obj.get("action") or "").lower()
         username = obj.get("username") or obj.get("user")
-        ip = obj.get("ip") or obj.get("host")
+        ip = obj.get("ip")  # "host" is the account's API hostname, not the actor's address
         description = obj.get("description") or obj.get("object", "")
 
         status = 403 if action in _HIGH_RISK_ADMIN_ACTIONS else 200
@@ -151,75 +152,21 @@ def _parse_items(items: list[Any]) -> list[LogEvent]:
     return events
 
 
+# Admin API responses: {"stat": "OK", "response": {"authlogs": [...], "metadata": {...}}} (auth log v2)
+# and {"stat": "OK", "response": [...]} (v1 logs, admin log)
+_ENVELOPES = ("response.authlogs", "response.items", "response", "authlogs", "items", "logs")
+
+
 class DuoParser(BaseParser):
     format_name = "duo"
 
     @classmethod
     def can_parse(cls, content: str, filename: str) -> bool:
-        if filename and "duo" in filename.lower():
-            return True
-        stripped = content.strip()
-        if not stripped.startswith("{") and not stripped.startswith("["):
-            return False
-        try:
-            data = json.loads(stripped)
-            if isinstance(data, list) and data:
-                return _is_duo(data[0])
-            if isinstance(data, dict):
-                # Duo API wraps in {"authlogs": {"items": [...]}, "metadata": {...}}
-                al = data.get("authlogs", {})
-                items = al.get("items") if isinstance(al, dict) else None
-                if isinstance(items, list) and items:
-                    return _is_duo(items[0])
-                items = data.get("items") or data.get("logs")
-                if isinstance(items, list) and items:
-                    return _is_duo(items[0])
-                return _is_duo(data)
-        except json.JSONDecodeError:
-            pass
-        for line in stripped.splitlines():
-            line = line.strip()
-            if not line:
-                continue
-            if not line.startswith("{"):
-                return False
-            try:
-                return _is_duo(json.loads(line))
-            except json.JSONDecodeError:
-                return False
-        return False
+        head = json_input.sample(content, _ENVELOPES)
+        return bool(head) and sum(_is_duo(r) for r in head) * 2 > len(head)
 
     @classmethod
     def parse(cls, content: str, filename: str = "") -> list[LogEvent]:
-        events: list[LogEvent] = []
-        stripped = content.strip()
-        try:
-            data = json.loads(stripped)
-            items: list[Any] = []
-            if isinstance(data, list):
-                items = data
-            elif isinstance(data, dict):
-                al = data.get("authlogs", {})
-                if isinstance(al, dict):
-                    items = al.get("items", [])
-                if not items:
-                    items = data.get("items") or data.get("logs") or ([data] if _is_duo(data) else [])
-            events = _parse_items(items)
-        except json.JSONDecodeError:
-            for line in stripped.splitlines():
-                line = line.strip()
-                if not line or not line.startswith("{"):
-                    continue
-                try:
-                    obj = json.loads(line)
-                    if _is_duo_auth(obj):
-                        if ev := _auth_to_log(obj):
-                            events.append(ev)
-                    elif _is_duo_admin(obj):
-                        if ev := _admin_to_log(obj):
-                            events.append(ev)
-                except json.JSONDecodeError:
-                    continue
-
+        events = _parse_items(json_input.records(content, _ENVELOPES))
         logger.info("Duo parser: %d events", len(events))
         return events

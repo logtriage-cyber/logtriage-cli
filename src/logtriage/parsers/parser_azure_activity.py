@@ -4,9 +4,10 @@
 Azure Resource Manager (ARM) Activity Log parser.
 
 Accepts:
-  - {"value": [...]} — Azure Monitor / Log Analytics export
-  - JSON array of activity records
-  - NDJSON
+  - {"value": [...]} — REST API / `az monitor activity-log list` output, or a bare array
+  - {"records": [...]} — diagnostic-setting exports to a storage account or Event Hub
+    (resource-log schema: time, resultType, callerIpAddress, identity.claims)
+  - NDJSON of either
 
 Key discriminator: records contain operationName (e.g. "Microsoft.Compute/virtualMachines/delete"),
 resourceProvider, subscriptionId, and status (Succeeded/Failed/Started).
@@ -26,6 +27,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Any
 
+from logtriage.parsers import json_input
 from logtriage.parsers.base_parser import BaseParser
 from logtriage.models import LogEvent, LogFormat
 
@@ -57,15 +59,33 @@ def _record_status(operation_name: str, status: str) -> int:
     return 200
 
 
+_UPN_CLAIM = "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/upn"
+
+
+def _claims_caller(identity: Any) -> str | None:
+    """The caller of a resource-log record (storage / Event Hub export): its token claims."""
+    claims = identity.get("claims") if isinstance(identity, dict) else None
+    if not isinstance(claims, dict):
+        return None
+    return claims.get(_UPN_CLAIM) or claims.get("name") or claims.get("appid")
+
+
 def _record_to_log(record: dict[str, Any]) -> LogEvent | None:
     try:
         op_name = record.get("operationName") or ""
         if isinstance(op_name, dict):
             op_name = op_name.get("value") or op_name.get("localizedValue") or ""
-        status = record.get("status") or ""
+        status = record.get("status") or record.get("resultType") or ""
         if isinstance(status, dict):
             status = status.get("value") or status.get("localizedValue") or ""
-        caller = record.get("caller")
+        if status.lower() == "success":  # resource-log schema says Success/Failure/Start
+            status = "Succeeded"
+        elif status.lower() == "failure":
+            status = "Failed"
+        caller = record.get("caller") or _claims_caller(record.get("identity"))
+        http_request = record.get("httpRequest")
+        http: dict[str, Any] = http_request if isinstance(http_request, dict) else {}
+        ip = http.get("clientIpAddress") or record.get("callerIpAddress")
         resource_id = record.get("resourceId") or record.get("id")
         resource_provider = record.get("resourceProviderName") or record.get("resourceProvider") or ""
         if isinstance(resource_provider, dict):
@@ -75,9 +95,9 @@ def _record_to_log(record: dict[str, Any]) -> LogEvent | None:
         return LogEvent(
             source_format=LogFormat.AZURE_ACTIVITY,
             timestamp=_parse_ts(ts_raw),
-            ip_address=record.get("httpRequest", {}).get("clientIpAddress") if isinstance(record.get("httpRequest"), dict) else None,
+            ip_address=ip or None,
             path=resource_id,
-            http_method=record.get("httpRequest", {}).get("method") if isinstance(record.get("httpRequest"), dict) else None,
+            http_method=http.get("method"),
             status_code=_record_status(op_name, status),
             user_principal_name=caller,
             resource_display_name=resource_provider or op_name.split("/")[0],
@@ -90,13 +110,20 @@ def _record_to_log(record: dict[str, Any]) -> LogEvent | None:
 
 
 def _is_azure_activity(obj: Any) -> bool:
-    return (
-        isinstance(obj, dict)
-        and ("operationName" in obj or "resourceProvider" in obj)
-        and ("subscriptionId" in obj or "subscription" in obj)
-        and ("eventTimestamp" in obj or "time" in obj or "timestamp" in obj)
-        and "caller" in obj
-    )
+    """REST / `az monitor activity-log list` records (caller, subscriptionId, status)
+    and resource-log records from diagnostic settings (time, resourceId, resultType,
+    identity) — the same rule as the free analyzer's Azure Activity adapter."""
+    if not isinstance(obj, dict) or "operationName" not in obj:
+        return False
+    category = obj.get("category")
+    category = category.get("value", "") if isinstance(category, dict) else str(category or "")
+    if "signin" in category.lower() or "flowevent" in category.lower():
+        return False
+    return "caller" in obj or "callerIpAddress" in obj or "resourceId" in obj
+
+
+# REST API: {"value": [...]}; diagnostic settings to storage / Event Hub: {"records": [...]}
+_ENVELOPES = ("value", "records")
 
 
 class AzureActivityParser(BaseParser):
@@ -104,61 +131,11 @@ class AzureActivityParser(BaseParser):
 
     @classmethod
     def can_parse(cls, content: str, filename: str) -> bool:
-        if filename:
-            fn = filename.lower()
-            if ("azure" in fn or "arm" in fn) and ("activity" in fn or "audit" in fn):
-                return True
-        stripped = content.strip()
-        if not stripped.startswith("{") and not stripped.startswith("["):
-            return False
-        try:
-            data = json.loads(stripped)
-            if isinstance(data, dict):
-                items = data.get("value")
-                if isinstance(items, list) and items:
-                    return _is_azure_activity(items[0])
-                return _is_azure_activity(data)
-            if isinstance(data, list) and data:
-                return _is_azure_activity(data[0])
-        except json.JSONDecodeError:
-            pass
-        for line in stripped.splitlines():
-            line = line.strip()
-            if not line:
-                continue
-            if not line.startswith("{"):
-                return False
-            try:
-                return _is_azure_activity(json.loads(line))
-            except json.JSONDecodeError:
-                return False
-        return False
+        head = json_input.sample(content, _ENVELOPES)
+        return bool(head) and sum(_is_azure_activity(r) for r in head) * 2 > len(head)
 
     @classmethod
     def parse(cls, content: str, filename: str = "") -> list[LogEvent]:
-        events: list[LogEvent] = []
-        stripped = content.strip()
-        try:
-            data = json.loads(stripped)
-            items: list[Any] = []
-            if isinstance(data, dict):
-                items = data.get("value", []) or ([data] if _is_azure_activity(data) else [])
-            elif isinstance(data, list):
-                items = data
-            for rec in items:
-                if ev := _record_to_log(rec):
-                    events.append(ev)
-        except json.JSONDecodeError:
-            for line in stripped.splitlines():
-                line = line.strip()
-                if not line or not line.startswith("{"):
-                    continue
-                try:
-                    obj = json.loads(line)
-                    if ev := _record_to_log(obj):
-                        events.append(ev)
-                except json.JSONDecodeError:
-                    continue
-
+        events = [ev for rec in json_input.records(content, _ENVELOPES) if (ev := _record_to_log(rec))]
         logger.info("Azure Activity parser: %d events", len(events))
         return events

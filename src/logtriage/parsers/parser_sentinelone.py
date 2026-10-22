@@ -15,10 +15,10 @@ Reference:
 """
 from __future__ import annotations
 
-import json
 import logging
 from datetime import datetime, timezone
 
+from logtriage.parsers import json_input
 from logtriage.parsers.base_parser import BaseParser
 from logtriage.models import LogEvent, LogFormat
 
@@ -99,6 +99,10 @@ def _alert_to_log(obj: dict) -> LogEvent | None:
     )
 
 
+# Management API responses: {"data": [...], "pagination": {...}}
+_ENVELOPES = ("data", "threats", "alerts")
+
+
 def parse_sentinelone(raw_text: str) -> list[LogEvent]:
     events: list[LogEvent] = []
 
@@ -110,26 +114,8 @@ def parse_sentinelone(raw_text: str) -> list[LogEvent]:
         except Exception as exc:
             logger.debug("SentinelOne: skipping object: %s", exc)
 
-    for line in raw_text.splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            obj = json.loads(line)
-            if isinstance(obj, dict):
-                inner = obj.get("data") or obj.get("threats") or obj.get("alerts")
-                if isinstance(inner, list):
-                    for item in inner:
-                        if isinstance(item, dict):
-                            _process(item)
-                elif obj.get("threatInfo") or obj.get("agentDetectionInfo"):
-                    _process(obj)
-            elif isinstance(obj, list):
-                for item in obj:
-                    if isinstance(item, dict):
-                        _process(item)
-        except (json.JSONDecodeError, Exception) as exc:
-            logger.debug("SentinelOne: JSON error: %s", exc)
+    for obj in json_input.records(raw_text, _ENVELOPES):
+        _process(obj)
 
     logger.info("SentinelOne parser: %d events", len(events))
     return events
@@ -146,27 +132,8 @@ class SentinelOneParser(BaseParser):
 
     @classmethod
     def can_parse(cls, content: str, filename: str) -> bool:
-        if filename and any(s in filename.lower() for s in ("sentinelone", "s1_", "s1-")):
-            pass
-        for line in content.splitlines():
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                obj = json.loads(line)
-                if isinstance(obj, dict):
-                    inner = obj.get("data") or obj.get("threats") or obj.get("alerts")
-                    if isinstance(inner, list) and inner and isinstance(inner[0], dict):
-                        obj = inner[0]
-                    if _is_sentinelone(obj):
-                        return True
-                elif isinstance(obj, list) and obj and isinstance(obj[0], dict):
-                    if _is_sentinelone(obj[0]):
-                        return True
-            except (json.JSONDecodeError, Exception):
-                pass
-            return False
-        return False
+        head = json_input.sample(content, _ENVELOPES, n=1)
+        return bool(head) and _is_sentinelone(head[0])
 
     @classmethod
     def parse(cls, content: str, filename: str = "") -> list[LogEvent]:

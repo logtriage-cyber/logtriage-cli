@@ -25,6 +25,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Any
 
+from logtriage.parsers import json_input
 from logtriage.parsers.base_parser import BaseParser
 from logtriage.models import LogEvent, LogFormat
 
@@ -91,48 +92,21 @@ def _finding_to_log(finding: dict[str, Any]) -> LogEvent | None:
         return None
 
 
+def _findings(raw_text: str) -> list[dict[str, Any]]:
+    """Findings from `get-findings` / S3 exports ({"findings": [...]}), single findings,
+    NDJSON, and EventBridge events ({"source": "aws.guardduty", "detail": {finding}})."""
+    out: list[dict[str, Any]] = []
+    for record in json_input.records(raw_text, ("findings", "Findings")):
+        detail = record.get("detail")
+        if record.get("source") == "aws.guardduty" and isinstance(detail, dict):
+            record = detail
+        out.append(record)
+    return out
+
+
 def parse_guardduty(raw_text: str) -> list[LogEvent]:
-    events: list[LogEvent] = []
-    stripped = raw_text.strip()
-
-    # S3 bulk export: {"findings": [...]}
-    if stripped.startswith("{"):
-        try:
-            data = json.loads(stripped)
-            findings = data.get("findings") if isinstance(data, dict) else None
-            if isinstance(findings, list):
-                for f in findings:
-                    if e := _finding_to_log(f):
-                        events.append(e)
-                logger.info("GuardDuty parser: %d findings from bulk export", len(events))
-                return events
-        except json.JSONDecodeError:
-            pass
-
-        # Single finding object
-        try:
-            data = json.loads(stripped)
-            if isinstance(data, dict) and "type" in data and "severity" in data:
-                if e := _finding_to_log(data):
-                    events.append(e)
-                logger.info("GuardDuty parser: 1 finding (single object)")
-                return events
-        except json.JSONDecodeError:
-            pass
-
-    # NDJSON — one finding per line
-    for line in stripped.splitlines():
-        line = line.strip()
-        if not line or not line.startswith("{"):
-            continue
-        try:
-            obj = json.loads(line)
-            if e := _finding_to_log(obj):
-                events.append(e)
-        except json.JSONDecodeError:
-            continue
-
-    logger.info("GuardDuty parser: %d findings from NDJSON", len(events))
+    events = [e for f in _findings(raw_text) if (e := _finding_to_log(f))]
+    logger.info("GuardDuty parser: %d findings", len(events))
     return events
 
 
@@ -154,32 +128,8 @@ class GuardDutyParser(BaseParser):
 
     @classmethod
     def can_parse(cls, content: str, filename: str) -> bool:
-        if filename and "guardduty" in filename.lower():
-            return True
-        stripped = content.strip()
-        # Bulk export shape
-        if stripped.startswith("{"):
-            try:
-                data = json.loads(stripped)
-                if isinstance(data, dict):
-                    findings = data.get("findings")
-                    if isinstance(findings, list) and findings:
-                        return _is_guardduty(findings[0])
-                    return _is_guardduty(data)
-            except json.JSONDecodeError:
-                pass
-        # NDJSON
-        for line in stripped.splitlines():
-            line = line.strip()
-            if not line:
-                continue
-            if not line.startswith("{"):
-                return False
-            try:
-                return _is_guardduty(json.loads(line))
-            except json.JSONDecodeError:
-                return False
-        return False
+        head = _findings(content)[:5]
+        return bool(head) and sum(_is_guardduty(f) for f in head) * 2 > len(head)
 
     @classmethod
     def parse(cls, content: str, filename: str = "") -> list[LogEvent]:

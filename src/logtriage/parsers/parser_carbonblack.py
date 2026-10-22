@@ -19,10 +19,10 @@ Reference:
 """
 from __future__ import annotations
 
-import json
 import logging
 from datetime import datetime, timezone
 
+from logtriage.parsers import json_input
 from logtriage.parsers.base_parser import BaseParser
 from logtriage.models import LogEvent, LogFormat
 
@@ -148,36 +148,20 @@ def _obj_to_log(obj: dict) -> LogEvent | None:
     return None
 
 
+# API responses: {"results": [...]} (Carbon Black Cloud search), {"data": [...]}
+_ENVELOPES = ("results", "data", "events", "alerts")
+
+
 def parse_carbonblack(raw_text: str) -> list[LogEvent]:
     events: list[LogEvent] = []
-    for line in raw_text.splitlines():
-        line = line.strip()
-        if not line:
-            continue
+    for obj in json_input.records(raw_text, _ENVELOPES):
         try:
-            obj = json.loads(line)
-            if isinstance(obj, list):
-                for item in obj:
-                    if isinstance(item, dict):
-                        e = _obj_to_log(item)
-                        if e:
-                            events.append(e)
-            elif isinstance(obj, dict):
-                for key in ("data", "events", "alerts"):
-                    inner = obj.get(key)
-                    if isinstance(inner, list):
-                        for item in inner:
-                            if isinstance(item, dict):
-                                e = _obj_to_log(item)
-                                if e:
-                                    events.append(e)
-                        break
-                else:
-                    e = _obj_to_log(obj)
-                    if e:
-                        events.append(e)
-        except (json.JSONDecodeError, Exception) as exc:
-            logger.debug("CarbonBlack: skipping line: %s", exc)
+            e = _obj_to_log(obj)
+        except Exception as exc:
+            logger.debug("CarbonBlack: skipping record: %s", exc)
+            continue
+        if e:
+            events.append(e)
     logger.info("CarbonBlack parser: %d events", len(events))
     return events
 
@@ -197,27 +181,8 @@ class CarbonBlackParser(BaseParser):
 
     @classmethod
     def can_parse(cls, content: str, filename: str) -> bool:
-        if filename and any(s in filename.lower() for s in ("carbonblack", "cb_", "cbr", "cbc_")):
-            pass
-        for line in content.splitlines():
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                obj = json.loads(line)
-                if isinstance(obj, dict):
-                    inner = obj.get("data") or obj.get("events") or obj.get("alerts")
-                    if isinstance(inner, list) and inner and isinstance(inner[0], dict):
-                        obj = inner[0]
-                    if _is_carbonblack(obj):
-                        return True
-                elif isinstance(obj, list) and obj and isinstance(obj[0], dict):
-                    if _is_carbonblack(obj[0]):
-                        return True
-            except (json.JSONDecodeError, Exception):
-                pass
-            return False
-        return False
+        head = json_input.sample(content, _ENVELOPES, n=1)
+        return bool(head) and _is_carbonblack(head[0])
 
     @classmethod
     def parse(cls, content: str, filename: str = "") -> list[LogEvent]:

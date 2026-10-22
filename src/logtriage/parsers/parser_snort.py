@@ -95,8 +95,6 @@ class SnortParser(BaseParser):
 
     @classmethod
     def can_parse(cls, content: str, filename: str) -> bool:
-        if filename and "snort" in filename.lower():
-            return True
         # Look for the distinctive [**] [gid:sid:rev] pattern in the first 20 lines
         count = 0
         for line in content.splitlines():

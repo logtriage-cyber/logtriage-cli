@@ -86,10 +86,6 @@ class IisParser(BaseParser):
 
     @classmethod
     def can_parse(cls, content: str, filename: str) -> bool:
-        if filename:
-            fn = filename.lower()
-            if fn.endswith(".log") and ("iis" in fn or "w3c" in fn or "u_ex" in fn):
-                return True
         has_fields = False
         has_software = False
         for line in content.splitlines()[:10]:

@@ -15,10 +15,11 @@ Reference:
 """
 from __future__ import annotations
 
-import json
 import logging
 from datetime import datetime, timezone
+from typing import Any
 
+from logtriage.parsers import json_input
 from logtriage.parsers.base_parser import BaseParser
 from logtriage.models import LogEvent, LogFormat
 
@@ -125,36 +126,53 @@ def _obj_to_log(obj: dict) -> LogEvent | None:
     )
 
 
+# Elasticsearch search results: {"hits": {"hits": [{"_source": {...}}]}}
+_ENVELOPES = ("hits.hits", "events", "data")
+
+
+def _records(raw_text: str) -> list[dict[str, Any]]:
+    """ECS documents, also when exported from Elasticsearch as hits with a `_source`."""
+    out = []
+    for obj in json_input.records(raw_text, _ENVELOPES):
+        source = obj.get("_source")
+        out.append(source if isinstance(source, dict) else obj)
+    return out
+
+
 def parse_ecs(raw_text: str) -> list[LogEvent]:
     events: list[LogEvent] = []
-    for line in raw_text.splitlines():
-        line = line.strip()
-        if not line:
+    for obj in _records(raw_text):
+        if not obj.get("@timestamp"):
             continue
         try:
-            obj = json.loads(line)
-            if isinstance(obj, list):
-                for item in obj:
-                    if isinstance(item, dict) and item.get("@timestamp"):
-                        e = _obj_to_log(item)
-                        if e:
-                            events.append(e)
-            elif isinstance(obj, dict) and obj.get("@timestamp"):
-                e = _obj_to_log(obj)
-                if e:
-                    events.append(e)
-        except (json.JSONDecodeError, Exception) as exc:
-            logger.debug("ECS: skipping line: %s", exc)
+            e = _obj_to_log(obj)
+        except Exception as exc:
+            logger.debug("ECS: skipping record: %s", exc)
+            continue
+        if e:
+            events.append(e)
     logger.info("ECS parser: %d events", len(events))
     return events
 
 
+_ECS_NAMESPACES = ("source", "destination", "host", "process", "user", "agent", "ecs", "url", "kibana", "network", "file", "dns")
+
+
 def _is_ecs(obj: dict) -> bool:
+    """An `event` object (ECS's own categorisation) plus another ECS namespace.
+
+    `@timestamp` with a `user` or `host` object alone is not enough: plenty of
+    JSON access logs have both, and the generic JSON parser reads those better.
+    Same rule as the free analyzer's ECS adapter.
+    """
     if not obj.get("@timestamp"):
         return False
-    # Must have at least one ECS namespace object
-    ecs_namespaces = ("event", "source", "destination", "host", "user", "network", "file", "process", "dns")
-    return any(isinstance(obj.get(ns), dict) for ns in ecs_namespaces)
+    has_event = isinstance(obj.get("event"), dict) or any(
+        k in obj for k in ("event.category", "event.action", "kibana.alert.rule.name")
+    )
+    return has_event and any(
+        ns in obj or any(k.startswith(f"{ns}.") for k in obj) for ns in _ECS_NAMESPACES
+    )
 
 
 class EcsParser(BaseParser):
@@ -162,22 +180,8 @@ class EcsParser(BaseParser):
 
     @classmethod
     def can_parse(cls, content: str, filename: str) -> bool:
-        if filename and any(s in filename.lower() for s in ("ecs_", "filebeat", "auditbeat", "winlogbeat", "elastic")):
-            pass
-        for line in content.splitlines():
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                obj = json.loads(line)
-                if isinstance(obj, dict) and _is_ecs(obj):
-                    return True
-                if isinstance(obj, list) and obj and isinstance(obj[0], dict) and _is_ecs(obj[0]):
-                    return True
-            except (json.JSONDecodeError, Exception):
-                pass
-            return False
-        return False
+        head = _records(content)[:1]
+        return bool(head) and _is_ecs(head[0])
 
     @classmethod
     def parse(cls, content: str, filename: str = "") -> list[LogEvent]:

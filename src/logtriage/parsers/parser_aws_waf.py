@@ -18,6 +18,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Any
 
+from logtriage.parsers import json_input
 from logtriage.parsers.base_parser import BaseParser
 from logtriage.models import LogEvent, LogFormat
 
@@ -70,16 +71,9 @@ def _record_to_log(rec: dict[str, Any]) -> LogEvent | None:
 
 def parse_aws_waf(raw_text: str) -> list[LogEvent]:
     events: list[LogEvent] = []
-    for line in raw_text.strip().splitlines():
-        line = line.strip()
-        if not line or not line.startswith("{"):
-            continue
-        try:
-            obj = json.loads(line)
-            if e := _record_to_log(obj):
-                events.append(e)
-        except json.JSONDecodeError:
-            continue
+    for obj in json_input.records(raw_text):
+        if e := _record_to_log(obj):
+            events.append(e)
     logger.info("AWS WAF parser: %d records parsed", len(events))
     return events
 
@@ -97,19 +91,8 @@ class AwsWafParser(BaseParser):
 
     @classmethod
     def can_parse(cls, content: str, filename: str) -> bool:
-        if filename and ("waf" in filename.lower() or "aws-waf" in filename.lower()):
-            return True
-        for line in content.strip().splitlines():
-            line = line.strip()
-            if not line:
-                continue
-            if not line.startswith("{"):
-                return False
-            try:
-                return _is_waf(json.loads(line))
-            except json.JSONDecodeError:
-                return False
-        return False
+        head = json_input.sample(content, n=1)
+        return bool(head) and _is_waf(head[0])
 
     @classmethod
     def parse(cls, content: str, filename: str = "") -> list[LogEvent]:

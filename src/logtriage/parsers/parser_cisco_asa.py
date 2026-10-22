@@ -35,10 +35,15 @@ _MSG_ID_RE = re.compile(r"%(?:ASA|FTD|PIX)-(\d)-(\w+):\s*(.*)", re.DOTALL)
 # Syslog timestamp prefix patterns. ASA's `logging timestamp` default puts the
 # year before the time ("Jan 15 2024 09:00:01"); relays often use the BSD form
 # without a year ("Jan 15 09:00:01") or append it ("Jan 15 09:00:01 2024").
+# Without `logging device-id` there is no hostname and the time ends in a colon
+# ("Aug 24 2007 08:54:31: %ASA-4-106023: ..." — Cisco's own examples); the
+# hostname must never swallow the "%ASA-..." message ID. `logging timestamp
+# rfc5424` writes an ISO 8601 time instead.
 _SYSLOG_TS_RE = re.compile(
-    r"^(?:<\d+>)?"                                                   # optional PRI
-    r"(\w{3}\s+\d+\s+(?:\d{4}\s+)?\d{2}:\d{2}:\d{2}(?:\s+\d{4})?)"   # timestamp
-    r"\s+\S+\s+"                                                     # hostname
+    r"^(?:<\d+>)?(?:1\s+)?"                                                     # optional PRI / RFC 5424 version
+    r"(\w{3}\s+\d+\s+(?:\d{4}\s+)?\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:\s+\d{4})?"   # BSD-style timestamp
+    r"|\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?)"  # or ISO 8601
+    r":?\s+(?:(?!%)\S+\s+)?"                                                    # optional hostname
 )
 
 # IP extraction helpers
@@ -65,8 +70,14 @@ def _parse_ts(raw: str | None) -> datetime:
     """
     if not raw:
         return datetime.now(timezone.utc)
+    if raw[:1].isdigit():  # logging timestamp rfc5424
+        try:
+            parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+            return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+        except ValueError:
+            return datetime.now(timezone.utc)
     text = " ".join(raw.split())  # "Jan  5" -> "Jan 5"
-    for fmt in ("%b %d %Y %H:%M:%S", "%b %d %H:%M:%S %Y"):
+    for fmt in ("%b %d %Y %H:%M:%S", "%b %d %H:%M:%S %Y", "%b %d %Y %H:%M:%S.%f", "%b %d %H:%M:%S.%f %Y"):
         try:
             return datetime.strptime(text, fmt).replace(tzinfo=timezone.utc)
         except ValueError:
@@ -150,8 +161,6 @@ class CiscoAsaParser(BaseParser):
 
     @classmethod
     def can_parse(cls, content: str, filename: str) -> bool:
-        if filename and any(s in filename.lower() for s in ("asa", "ftd", "pix", "cisco")):
-            pass
         count = 0
         for line in content.splitlines():
             if not line.strip():
