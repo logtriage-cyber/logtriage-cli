@@ -173,7 +173,7 @@ Timestamps keep the offset the source gives. Formats without one (Microsoft 365 
 | Format | Category | `--format` id | What it is |
 |---|---|---|---|
 | AWS ALB / ELB | Cloud | `aws_alb` | Access logs from AWS Application and Elastic Load Balancers. |
-| AWS CloudTrail | Cloud | `cloudtrail` | AWS API call history — every console, SDK, and CLI action against your account. |
+| [AWS CloudTrail](https://logtriage.app/reference/log-formats/cloudtrail/) | Cloud | `cloudtrail` | AWS API call history — every console, SDK, and CLI action against your account. |
 | AWS Config | Cloud | `aws_config` | Configuration change history for AWS resources. |
 | AWS S3 Server Access Logs | Cloud | `aws_s3_access` | Request-level access logs for Amazon S3 buckets. |
 | Azure ARM Activity Log | Cloud | `azure_activity` | Subscription-level control-plane operations across Azure Resource Manager. |
@@ -218,7 +218,7 @@ Timestamps keep the offset the source gives. Formats without one (Microsoft 365 
 | Slack Audit Log | SaaS | `slack_audit` | Workspace administration and access events from Slack's Enterprise Audit Log. |
 | Elastic Common Schema | SIEM | `ecs` | Normalized event schema used by Filebeat, Auditbeat, and Winlogbeat in the Elastic Stack. |
 | IBM LEEF | SIEM | `leef` | Log Event Extended Format used for QRadar integrations. |
-| AWS WAF | WAF | `aws_waf` | Web ACL allow/block decisions from AWS WAF. |
+| [AWS WAF](https://logtriage.app/reference/log-formats/aws-waf/) | WAF | `aws_waf` | Web ACL allow/block decisions from AWS WAF. |
 | F5 BIG-IP ASM | WAF | `f5_asm` | Application-layer attack detections from F5's web application firewall module. |
 | IIS W3C Extended | Web | `iis` | Microsoft Internet Information Services extended logging format. |
 | nginx / Apache Combined | Web | `nginx` | The standard combined access log format used by nginx and Apache. |
