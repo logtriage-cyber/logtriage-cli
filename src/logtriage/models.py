@@ -63,6 +63,8 @@ class LogFormat(str, Enum):
     TRAEFIK = "traefik"
     MYSQL = "mysql"
     POSTGRESQL = "postgresql"
+    # P49.9
+    AUDITD = "auditd"
 
 
 class DeviceDetail(BaseModel):

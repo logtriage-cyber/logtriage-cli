@@ -293,8 +293,9 @@ def parse_csv(raw_text: str) -> list[LogEvent]:
     return events
 
 
-# Common/Combined Log Format: client ident user [time] "request"
-_CLF_PREFIX = re.compile(r'^\S+ \S+ \S+ \[[^\]]+\] "')
+# Common/Combined Log Format: client ident user [time] "request", optionally after
+# leading fields such as a forwarded-for address or Apache's vhost:port
+_CLF_PREFIX = re.compile(r'^(?:\S+ ){0,3}?\S+ \S+ \S+ \[[^\]]+\] "')
 
 
 class GenericCsvParser(BaseParser):

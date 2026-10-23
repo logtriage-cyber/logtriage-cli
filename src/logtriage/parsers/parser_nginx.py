@@ -11,6 +11,7 @@ Example:
 """
 from __future__ import annotations
 
+import ipaddress
 import logging
 import re
 from datetime import datetime, timezone
@@ -21,6 +22,9 @@ logger = logging.getLogger(__name__)
 
 # Regex for nginx/Apache combined log format
 _COMBINED_RE = re.compile(
+    # Fields some log_formats put first: the forwarded-for chain or a second address
+    # ("$http_x_forwarded_for $remote_addr - ..."), Apache's "%v:%p" virtual host
+    r'(?P<lead>(?:\S+\s+){0,3}?)'
     r'(?P<ip>\S+)'           # remote_addr
     r'\s+\S+'                # ident (usually -)
     r'\s+\S+'                # auth user (usually -)
@@ -52,6 +56,40 @@ def _parse_request(request_line: str) -> tuple[str | None, str | None]:
     return None, None
 
 
+def _address(token: str) -> ipaddress.IPv4Address | ipaddress.IPv6Address | None:
+    token = token.strip().rstrip(",")
+    if token.startswith("[") and "]" in token:  # [2001:db8::1]:443
+        token = token[1:token.index("]")]
+    elif token.count(":") == 1:  # 203.0.113.5:443
+        token = token.split(":", 1)[0]
+    try:
+        return ipaddress.ip_address(token)
+    except ValueError:
+        return None
+
+
+# Internal addresses — the free analyzer's isPrivateIp (util.mjs) uses the same list
+_INTERNAL_NETS = tuple(ipaddress.ip_network(n) for n in (
+    "0.0.0.0/8", "10.0.0.0/8", "100.64.0.0/10", "127.0.0.0/8", "169.254.0.0/16", "172.16.0.0/12",
+    "192.168.0.0/16", "::/128", "::1/128", "fc00::/7", "fe80::/10",
+))
+
+
+def _is_internal(addr: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
+    return any(addr.version == net.version and addr in net for net in _INTERNAL_NETS)
+
+
+def _client(lead: str, remote_addr: str) -> str:
+    """The client among the line's leading addresses: the first public one, else
+    remote_addr. With "$http_x_forwarded_for $remote_addr" the proxy is private
+    (or a CDN edge listed last) and the visitor comes first."""
+    for token in [*lead.split(), remote_addr]:
+        addr = _address(token)
+        if addr is not None and not _is_internal(addr):
+            return str(addr)
+    return remote_addr
+
+
 def _parse_line(line: str) -> LogEvent | None:
     line = line.strip()
     if not line or line.startswith("#"):
@@ -77,7 +115,7 @@ def _parse_line(line: str) -> LogEvent | None:
         source_format=LogFormat.NGINX,
         raw_line=line,
         timestamp=_parse_timestamp(m.group("time")),
-        ip_address=m.group("ip"),
+        ip_address=_client(m.group("lead") or "", m.group("ip")),
         http_method=method,
         path=path,
         status_code=int(m.group("status")),

@@ -22,6 +22,7 @@ class Format(NamedTuple):
 
 
 FORMATS: tuple[Format, ...] = (
+    Format("auditd", "auditd", "Linux audit log (auditd)", "Endpoint"),
     Format("auth_log", "auth-log", "Linux auth.log / secure", "Endpoint"),
     Format("aws_alb", "aws-alb", "AWS ALB / ELB", "Cloud"),
     Format("aws_config", "aws-config", "AWS Config", "Cloud"),

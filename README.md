@@ -1,6 +1,6 @@
 # LogTriage CLI
 
-`logtriage` reads security logs on your own machine. It recognises 50 log formats (AWS CloudTrail, Entra ID / Azure AD sign-ins, Windows Security events, Sysmon, Okta, nginx/Apache, firewalls, EDR exports and more), converts every record to one normalised schema, and gives you a quick triage summary in the terminal or the events as JSON, NDJSON or CSV.
+`logtriage` reads security logs on your own machine. It recognises 51 log formats (AWS CloudTrail, Entra ID / Azure AD sign-ins, Windows Security events, Sysmon, Okta, nginx/Apache, firewalls, EDR exports and more), converts every record to one normalised schema, and gives you a quick triage summary in the terminal or the events as JSON, NDJSON or CSV.
 
 The parsers are the ones the hosted [LogTriage](https://logtriage.app) service runs, synced into this repository.
 
@@ -168,7 +168,7 @@ Timestamps keep the offset the source gives. Formats without one (Microsoft 365 
 ## Supported formats
 
 <!-- formats-table:start -->
-50 formats, detected automatically. Linked names have a field-by-field reference page on logtriage.app.
+51 formats, detected automatically. Linked names have a field-by-field reference page on logtriage.app.
 
 | Format | Category | `--format` id | What it is |
 |---|---|---|---|
@@ -190,6 +190,7 @@ Timestamps keep the offset the source gives. Formats without one (Microsoft 365 
 | [CrowdStrike Falcon](https://logtriage.app/reference/log-formats/crowdstrike/) | EDR | `crowdstrike` | Process, network, and detection telemetry from the CrowdStrike Falcon Data Replicator. |
 | Microsoft Defender for Endpoint | EDR | `mdatp` | Alerts and advanced hunting events from Microsoft Defender ATP. |
 | SentinelOne | EDR | `sentinelone` | Threat detections and agent telemetry from the SentinelOne endpoint platform. |
+| Linux audit log (auditd) | Endpoint | `auditd` | Linux Audit records from /var/log/audit/audit.log: login attempts and outcomes, executed commands, account and group changes, audit rule changes. |
 | Linux auth.log / secure | Endpoint | `auth_log` | SSH, sudo, and PAM authentication events from Linux hosts. |
 | [Sysmon](https://logtriage.app/reference/log-formats/sysmon/) | Endpoint | `sysmon` | Deep Windows process, network, and file-system telemetry from Microsoft Sysinternals Sysmon. |
 | [Windows Event Log](https://logtriage.app/reference/log-formats/evtx/) | Endpoint | `evtx` | Native Windows Event Log XML and binary .evtx exports. |

@@ -45,15 +45,16 @@ Detection priority (most specific first):
   39. HAProxy         — syslog lines with haproxy[pid]: and HTTP/TCP access log structure
   40. Traefik         — NDJSON with RouterName + ServiceName + DownstreamStatus
   41. IIS             — W3C text with #Fields: cs-method/sc-status/cs-uri-stem header
-  42. Syslog          — lines starting with <PRI> (RFC 5424 or RFC 3164)
-  43. AuthLog         — BSD syslog lines without <PRI>, or files named auth.log/secure
-  44. Zeek            — TSV starting with #separator header line
-  45. Snort           — text lines containing [**] [gid:sid:rev] pattern
-  46. MySQL           — slow query # User@Host: lines or mysqld error log timestamps
-  47. PostgreSQL      — CSV log with 23+ columns, log_time + error_severity
-  48. GenericCSV      — .csv extension or comma-separated header
-  49. GenericJSON     — JSON array, object, or NDJSON
-  50. Nginx           — catch-all for unrecognised text/log files
+  42. Auditd          — Linux audit records: type=<TYPE> msg=audit(<epoch>.<ms>:<serial>):
+  43. Syslog          — lines starting with <PRI> (RFC 5424 or RFC 3164)
+  44. AuthLog         — BSD syslog lines without <PRI>, or files named auth.log/secure
+  45. Zeek            — TSV starting with #separator header line
+  46. Snort           — text lines containing [**] [gid:sid:rev] pattern
+  47. MySQL           — slow query # User@Host: lines or mysqld error log timestamps
+  48. PostgreSQL      — CSV log with 23+ columns, log_time + error_severity
+  49. GenericCSV      — .csv extension or comma-separated header
+  50. GenericJSON     — JSON array, object, or NDJSON
+  51. Nginx           — catch-all for unrecognised text/log files
 """
 from __future__ import annotations
 
@@ -112,6 +113,7 @@ def _build_registry() -> list[type[BaseParser]]:
     from logtriage.parsers.parser_haproxy import HaproxyParser
     from logtriage.parsers.parser_traefik import TraefikParser
     from logtriage.parsers.parser_iis import IisParser
+    from logtriage.parsers.parser_auditd import AuditdParser
     from logtriage.parsers.parser_syslog import SyslogParser
     from logtriage.parsers.parser_authlog import AuthLogParser
     from logtriage.parsers.parser_zeek import ZeekParser
@@ -164,6 +166,7 @@ def _build_registry() -> list[type[BaseParser]]:
         HaproxyParser,
         TraefikParser,
         IisParser,
+        AuditdParser,
         SyslogParser,
         AuthLogParser,
         ZeekParser,
@@ -191,7 +194,7 @@ def strip_grep_prefix(content: str) -> str | None:
     names (files), not per-line values such as addresses. The free analyzer applies
     the same rule (stripGrepPrefix in marketing/src/lib/analyzer/index.mjs).
     """
-    sample = [line for line in content[: 1 << 20].splitlines() if line.strip()][:20]
+    sample = [line for line in content[: 1 << 20].split("\n") if line.strip()][:20]
     if len(sample) == 1:  # one line: only a one-line JSON document after the prefix
         m = _GREP_PREFIX_RE.match(sample[0])
         rest = sample[0][m.end():].lstrip() if m else ""
@@ -204,7 +207,7 @@ def strip_grep_prefix(content: str) -> str | None:
     ]
     if len(prefixes) < 0.9 * len(sample) or len(set(prefixes)) > max(3, len(sample) / 4):
         return None
-    return "\n".join(_GREP_PREFIX_RE.sub("", line, count=1) for line in content.splitlines())
+    return "\n".join(_GREP_PREFIX_RE.sub("", line, count=1) for line in content.split("\n"))
 
 
 def detect_and_parse(content: str, filename: str = "") -> tuple[list[LogEvent], str]:
@@ -261,5 +264,5 @@ def detect_and_parse(content: str, filename: str = "") -> tuple[list[LogEvent], 
         "Suricata EVE JSON, Zeek, Snort, Wazuh HIDS, "
         "Cisco ASA/FTD, PAN-OS, FortiGate, F5 BIG-IP ASM, Juniper SRX, IBM LEEF, "
         "CrowdStrike Falcon, SentinelOne, Carbon Black, Microsoft Defender, "
-        "Elastic ECS, CSV, NDJSON."
+        "Elastic ECS, Linux auditd, CSV, NDJSON."
     )
