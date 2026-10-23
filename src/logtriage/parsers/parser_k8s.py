@@ -60,6 +60,61 @@ _SENSITIVE_RESOURCES = {
 }
 
 
+# Kubernetes' own components: their constant secret reads, bindings and pod creation
+# (DaemonSets) are the cluster working, not an actor to investigate.
+_CONTROL_PLANE_USERS = frozenset({
+    "system:apiserver", "system:kube-controller-manager", "system:kube-scheduler", "system:kube-proxy",
+})
+_CONTROL_PLANE_PREFIXES = ("system:node:", "system:serviceaccount:kube-system:")
+_HEALTH_PATHS = ("/healthz", "/livez", "/readyz", "/version", "/openid/", "/.well-known/")
+
+
+def _is_control_plane(username: str | None) -> bool:
+    return bool(username) and (username in _CONTROL_PLANE_USERS or username.startswith(_CONTROL_PLANE_PREFIXES))
+
+
+def _is_privileged_pod(spec: dict[str, Any]) -> bool:
+    containers = (spec.get("containers") or []) + (spec.get("initContainers") or [])
+    return bool(
+        any(isinstance(c, dict) and (c.get("securityContext") or {}).get("privileged") for c in containers)
+        or spec.get("hostPID") or spec.get("hostNetwork") or spec.get("hostIPC")
+        or any(isinstance(v, dict) and (v.get("hostPath") or {}).get("path") == "/" for v in spec.get("volumes") or [])
+    )
+
+
+def _signals(raw: dict[str, Any], username: str | None, status_code: int | None) -> list[str]:
+    """What this request means for security — read from the audit record itself
+    (roleRef and pod spec are only here). Successful requests only; a refused one
+    is scored by its status code. The free analyzer's Kubernetes checks match these
+    (marketing/src/lib/analyzer/adapters/cloud.mjs, k8sEvent)."""
+    if status_code is not None and status_code >= 400:
+        return []
+    verb = str(raw.get("verb") or "").lower()
+    ref: dict[str, Any] = raw.get("objectRef") or {}
+    resource, subresource, namespace = ref.get("resource"), ref.get("subresource"), ref.get("namespace")
+    system = _is_control_plane(username)
+
+    if username == "system:anonymous":
+        uri = str(raw.get("requestURI") or "")
+        return [] if uri.startswith(_HEALTH_PATHS) else ["k8s_anonymous_allowed"]
+    if resource in ("rolebindings", "clusterrolebindings") and verb in ("create", "update", "patch") and not system:
+        body = raw.get("requestObject") or raw.get("responseObject") or {}
+        role = (body.get("roleRef") or {}).get("name") if isinstance(body, dict) else None
+        if role == "cluster-admin":
+            return ["k8s_cluster_admin_binding"]
+        return ["k8s_cluster_role_binding" if resource == "clusterrolebindings" else "k8s_role_binding"]
+    if resource == "pods" and subresource in ("exec", "attach", "portforward"):
+        return ["k8s_exec"]
+    if resource == "pods" and verb == "create" and not subresource and not system:
+        spec = (raw.get("requestObject") or {}).get("spec") or {}
+        return ["k8s_privileged_pod"] if isinstance(spec, dict) and _is_privileged_pod(spec) else []
+    if resource == "secrets" and verb in ("get", "list", "watch") and not system:
+        if not namespace or namespace == "kube-system":
+            return ["k8s_secrets_cluster_wide"]
+        return ["k8s_secret_read"]
+    return []
+
+
 def _ts(raw: str | None) -> datetime:
     if not raw:
         return datetime.now(timezone.utc)
@@ -123,6 +178,12 @@ def _parse_event(raw: dict[str, Any]) -> LogEvent | None:
         resource_name = obj_ref.get("resource") if obj_ref else None
         resource_display = f"k8s/{resource_name}" if resource_name else "Kubernetes API Server"
 
+        # `kubectl --as` and access proxies (Rancher, Teleport) act as another identity:
+        # the request ran with the impersonated user's rights, so that is who it is attributed to.
+        impersonated = raw.get("impersonatedUser") or {}
+        if isinstance(impersonated, dict) and impersonated.get("username"):
+            username = impersonated["username"]
+
         return LogEvent(
             source_format=LogFormat.K8S_AUDIT,
             timestamp=_ts(ts_raw),
@@ -134,6 +195,7 @@ def _parse_event(raw: dict[str, Any]) -> LogEvent | None:
             user_principal_name=username,
             resource_display_name=resource_display,
             failure_reason=failure_reason,
+            signals=_signals(raw, username, status_code),
         )
     except Exception as exc:
         logger.debug("Skipping malformed K8s audit event: %s", exc)

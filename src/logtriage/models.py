@@ -130,6 +130,11 @@ class LogEvent(BaseModel):
     # File hash extracted by parser (P14 — CEF fileHash / EVTX 4688 Hashes)
     file_hash: str | None = None  # SHA256 (64 hex chars) or MD5 (32 hex chars)
 
+    # Security meaning only the parser can read from the record itself, e.g. a
+    # Kubernetes role binding whose roleRef is cluster-admin ("k8s_cluster_admin_binding").
+    # Scored by event_scorer (_SIGNAL_FLOORS) and mapped to ATT&CK by mitre_mapper.
+    signals: list[str] = Field(default_factory=list)
+
     @field_validator("timestamp")
     @classmethod
     def _aware_timestamp(cls, value: datetime) -> datetime:

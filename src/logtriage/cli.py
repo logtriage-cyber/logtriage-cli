@@ -113,7 +113,10 @@ def write_events(events: list[LogEvent], fmt: str, out: TextIO, include_raw: boo
             writer.writerow([_csv_cell(row.get(column)) for column in columns])
         return
     lines = (
-        json.dumps(event.model_dump(mode="json", exclude_none=True, exclude=exclude))
+        json.dumps({
+            k: v for k, v in event.model_dump(mode="json", exclude_none=True, exclude=exclude).items()
+            if v != []  # empty fields are left out, empty lists (signals) too
+        })
         for event in events
     )
     if fmt == "ndjson":
