@@ -11,7 +11,9 @@ destination/server-side objects). Forwarded/original client addresses outrank
 the immediate peer, an authenticated user outranks a generic user name, and
 "@timestamp", ISO 8601, nginx time_local and epoch s/ms timestamps parse.
 
-Input shapes: CSV with a header row; JSON arrays; wrapper objects holding the
+Input shapes: CSV with or without a header row, comma / semicolon / tab / "|"
+separated (see csv_layout: fields the column names do not provide are read from
+columns whose values have their shape); JSON arrays; wrapper objects holding the
 record list (records/events/logs/data/items/value/results/entries, or an
 Elasticsearch hits export); NDJSON; a single JSON record.
 
@@ -24,9 +26,12 @@ from __future__ import annotations
 
 import csv
 import io
+import ipaddress
 import json
 import logging
 import re
+from collections import Counter
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
@@ -161,9 +166,10 @@ def _normalise_keys(record: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
-def _parse_ts(raw: Any) -> datetime:
+def _try_parse_ts(raw: Any) -> datetime | None:
+    """The time in `raw`, or None when it holds no time this reader understands."""
     if raw is None or raw == "":
-        return datetime.now(timezone.utc)
+        return None
     # Epoch seconds or milliseconds (numbers or numeric strings), only within
     # plausible ranges (2001-2286) so a compact date such as 20261015 is not
     # misread as a 1970 timestamp.
@@ -177,7 +183,7 @@ def _parse_ts(raw: Any) -> datetime:
         except (ValueError, OverflowError, OSError):
             pass
     s = str(raw).strip()
-    try:  # ISO 8601 incl. "Z", fractions and offsets
+    try:  # ISO 8601 incl. "Z", fractions (SQL Server's 7 digits too) and offsets
         dt = datetime.fromisoformat(s.replace("Z", "+00:00"))
         return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
     except ValueError:
@@ -192,7 +198,11 @@ def _parse_ts(raw: Any) -> datetime:
             return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
         except ValueError:
             continue
-    return datetime.now(timezone.utc)
+    return None
+
+
+def _parse_ts(raw: Any) -> datetime:
+    return _try_parse_ts(raw) or datetime.now(timezone.utc)
 
 
 def _record_to_event(record: dict[str, Any], source_format: LogFormat = LogFormat.GENERIC_JSON) -> LogEvent | None:
@@ -279,17 +289,166 @@ def parse_json(raw_text: str) -> list[LogEvent]:
     return events
 
 
+# ── CSV layout ────────────────────────────────────────────────────────────────
+# A CSV can arrive without a header row (a database or script export) or with ";",
+# tab or "|" between its fields (Excel in many locales). Until 2026-10-27 this reader
+# split on commas only and took the first row as the header, so neither kind mapped a
+# single field: a real 109,356-row export without a header "completed" with no time,
+# address or user in any event, and was reported as low risk. Now the delimiter is
+# sniffed, a first row that holds data is read as data, and any canonical field the
+# column names do not provide is taken from a column whose values have its shape
+# (addresses, e-mail addresses, times, URLs) — never from a destination-side column.
+
+_SAMPLE_ROWS = 200
+_HTTP_METHODS = frozenset({"GET", "POST", "PUT", "DELETE", "HEAD", "OPTIONS", "PATCH", "CONNECT", "TRACE"})
+_EMAIL_VALUE = re.compile(r"^[^@\s,;]+@[^@\s,;]+\.[A-Za-z]{2,}$")
+_UA_VALUE = re.compile(r"^(Mozilla|curl|Wget|python-requests|Go-http-client|okhttp|Java|Dalvik)/", re.I)
+_HAS_CLOCK = re.compile(r"\d{1,2}:\d{2}")
+_DESTINATION_NAME = re.compile(r"(^|_)(dst|dest|destination|server|target|upstream|backend|host|to)(_|$)")
+# Shapes that a column name never has: a first row holding one of them is data.
+_DATA_SHAPES = frozenset({"ip", "email", "datetime", "date", "path", "user_agent"})
+# Which shape fills which canonical field, in order; a date-only column is the time
+# only when no column holds a full date and time.
+_FIELD_SHAPES: tuple[tuple[str, str], ...] = (
+    ("timestamp", "datetime"), ("ip_address", "ip"), ("user_principal_name", "email"), ("path", "path"),
+    ("user_agent", "user_agent"), ("http_method", "method"), ("status_code", "status"), ("timestamp", "date"),
+)
+FIELD_LABELS = {
+    "timestamp": "the time", "ip_address": "the client address", "user_principal_name": "the user",
+    "path": "the URL or path", "user_agent": "the user agent", "http_method": "the HTTP method",
+    "status_code": "the status code",
+}
+
+
+def _sniff_delimiter(first_line: str) -> str:
+    """The separator used most outside quotes in the first line (comma on a tie)."""
+    best, best_count = ",", -1
+    for delim in (",", ";", "\t", "|"):
+        count, quoted = 0, False
+        for ch in first_line:
+            if ch == '"':
+                quoted = not quoted
+            elif ch == delim and not quoted:
+                count += 1
+        if count > best_count:
+            best, best_count = delim, count
+    return best
+
+
+def _cell_shape(value: str) -> str:
+    v = value.strip()
+    if not v or v == "-":
+        return "empty"
+    if v.upper() in _HTTP_METHODS:
+        return "method"
+    if v.isdigit():
+        if len(v) == 3 and 100 <= int(v) <= 599:
+            return "status"
+        if len(v) in (10, 13) and _try_parse_ts(v) is not None:
+            return "datetime"
+        return "int"
+    try:
+        ipaddress.ip_address(v)
+        return "ip"
+    except ValueError:
+        pass
+    if _EMAIL_VALUE.match(v):
+        return "email"
+    if v.lower().startswith(("http://", "https://")) or (v.startswith("/") and " " not in v):
+        return "path"
+    if _UA_VALUE.match(v):
+        return "user_agent"
+    if _try_parse_ts(v) is not None:
+        return "datetime" if _HAS_CLOCK.search(v) else "date"
+    return "text"
+
+
+def _column_shapes(rows: list[list[str]], columns: int) -> list[str]:
+    """The shape of each column: the one at least 80% of its non-empty cells have."""
+    shapes = []
+    for c in range(columns):
+        seen = [s for s in (_cell_shape(r[c]) for r in rows if c < len(r)) if s != "empty"]
+        top, count = Counter(seen).most_common(1)[0] if seen else ("empty", 0)
+        shapes.append(top if seen and count >= 0.8 * len(seen) else "mixed")
+    return shapes
+
+
+@dataclass
+class CsvLayout:
+    delimiter: str
+    has_header: bool
+    names: list[str]             # the key of each column in the records built from rows
+    by_value: dict[int, str]     # column index -> canonical field read from its values
+    columns: int
+
+
+def csv_layout(text: str) -> CsvLayout:
+    """How to read a CSV: delimiter, whether the first row is a header, and which column
+    gives each canonical field. Reads the first rows only."""
+    text = text.lstrip("﻿")
+    first_line = next((line for line in text.splitlines() if line.strip()), "")
+    delimiter = _sniff_delimiter(first_line)
+    reader = csv.reader(io.StringIO(text), delimiter=delimiter)
+    sample = [row for _, row in zip(range(_SAMPLE_ROWS + 1), (r for r in reader if any(c.strip() for c in r)))]
+    if not sample:
+        return CsvLayout(delimiter, True, [], {}, 0)
+    first, rest = sample[0], sample[1:]
+    columns = max(len(r) for r in sample)
+    body_shapes = _column_shapes(rest or [first], columns)
+    first_shapes = [_cell_shape(c) for c in first]
+    data_cells = [i for i, s in enumerate(first_shapes) if s in _DATA_SHAPES]
+    has_header = not data_cells or not all(body_shapes[i] == first_shapes[i] for i in data_cells)
+
+    names = [str(n) for n in first] if has_header else []
+    names += [f"column_{i + 1}" for i in range(len(names), columns)]
+    normalised = [_norm_key(n) for n in names]
+    provided = {f for f, cands in _CANDIDATES.items() if any(n in cands for n in normalised)} if has_header else set()
+    shapes = body_shapes if has_header else _column_shapes(sample, columns)
+    taken = {i for i, n in enumerate(normalised) if any(n in cands for cands in _CANDIDATES.values())} if has_header else set()
+    by_value: dict[int, str] = {}
+    for field_name, shape in _FIELD_SHAPES:
+        if field_name in provided or field_name in by_value.values():
+            continue
+        for i, s in enumerate(shapes):
+            if s == shape and i not in taken and i not in by_value and not _DESTINATION_NAME.search(normalised[i]):
+                by_value[i] = field_name
+                break
+    for i, field_name in by_value.items():
+        names[i] = field_name
+    return CsvLayout(delimiter, has_header, names, by_value, columns)
+
+
+def describe_layout(layout: CsvLayout) -> str | None:
+    """One sentence for the report when columns were read by their values, else None."""
+    if not layout.by_value:
+        return None
+    read = "; ".join(f"column {i + 1} as {FIELD_LABELS[f]}" for i, f in sorted(layout.by_value.items()))
+    if layout.has_header:
+        return f"Some column names were not ones LogTriage knows, so it read columns by their values: {read}."
+    return f"This CSV has no header row, so LogTriage read its columns by their values: {read}."
+
+
 def parse_csv(raw_text: str) -> list[LogEvent]:
-    """Parse generic CSV with auto-detected header row."""
-    reader = csv.DictReader(io.StringIO(raw_text))
+    """Parse a generic CSV: sniffed delimiter, header row optional (see csv_layout)."""
+    text = raw_text.lstrip("﻿")
+    layout = csv_layout(text)
+    reader = csv.reader(io.StringIO(text), delimiter=layout.delimiter)
     events: list[LogEvent] = []
+    header_skipped = not layout.has_header
     for i, row in enumerate(reader):
+        if not any(c.strip() for c in row):
+            continue
+        if not header_skipped:
+            header_skipped = True
+            continue
         try:
-            if event := _record_to_event(dict(row), source_format=LogFormat.GENERIC_CSV):
+            record = {name: (row[c] if c < len(row) else "") for c, name in enumerate(layout.names)}
+            if event := _record_to_event(record, source_format=LogFormat.GENERIC_CSV):
                 events.append(event)
         except Exception as exc:
             logger.debug("CSV row %d skipped: %s", i + 1, exc)
-    logger.info("CSV parser: %d events", len(events))
+    logger.info("CSV parser: %d events (delimiter %r, header %s, by value %s)",
+                len(events), layout.delimiter, layout.has_header, layout.by_value or "-")
     return events
 
 
