@@ -36,6 +36,16 @@ _BSD_TS_RE = re.compile(
     r"\s+(\S+)\s+(\S+?)(?:\[(\d+)\])?:\s*(.*)"
 )
 
+# Claiming a file needs more than a time and two words before a colon: a tab-separated CSV
+# row "2026-06-16T08:00:00Z<TAB>8.8.8.8<TAB>https://github.com/…" matched the patterns above
+# ("https" read as the program) and was read as an auth log (found 2026-10-28 by the CSV
+# shape tests). A syslog header has spaces between its fields and a tag — a program name,
+# an optional [pid] — followed by ": ".
+_CLAIM_RE = re.compile(
+    r"^(?:\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:[+-]\d{2}:\d{2}|Z)?|\w{3} +\d{1,2} \d{2}:\d{2}:\d{2})"
+    r" +\S+ +[\w.@()/-]+?(?:\[\d+\])?: "
+)
+
 _BSD_MONTHS = {
     "jan": 1, "feb": 2, "mar": 3, "apr": 4, "may": 5, "jun": 6,
     "jul": 7, "aug": 8, "sep": 9, "oct": 10, "nov": 11, "dec": 12,
@@ -190,7 +200,7 @@ class AuthLogParser(BaseParser):
                 continue
             if re.match(r"<\d+>", line):
                 return False  # syslog — leave it for SyslogParser
-            if _BSD_TS_RE.match(line) or _ISO_TS_RE.match(line):
+            if _CLAIM_RE.match(line):
                 hits += 1
             if hits >= 2:
                 return True

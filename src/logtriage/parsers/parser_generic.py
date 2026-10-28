@@ -302,7 +302,9 @@ def parse_json(raw_text: str) -> list[LogEvent]:
 _SAMPLE_ROWS = 200
 _HTTP_METHODS = frozenset({"GET", "POST", "PUT", "DELETE", "HEAD", "OPTIONS", "PATCH", "CONNECT", "TRACE"})
 _EMAIL_VALUE = re.compile(r"^[^@\s,;]+@[^@\s,;]+\.[A-Za-z]{2,}$")
-_UA_VALUE = re.compile(r"^(Mozilla|curl|Wget|python-requests|Go-http-client|okhttp|Java|Dalvik)/", re.I)
+# A user agent starts with product/version ("Mozilla/5.0 (…)", "curl/8.0.1", "sqlmap/1.7.8");
+# a version starting with a digit keeps out "text/html" and "api/v1".
+_UA_VALUE = re.compile(r"^[A-Za-z][\w.+-]*/\d[\w.+-]*(?:\s|$)")
 _HAS_CLOCK = re.compile(r"\d{1,2}:\d{2}")
 _DESTINATION_NAME = re.compile(r"(^|_)(dst|dest|destination|server|target|upstream|backend|host|to)(_|$)")
 # Shapes that a column name never has: a first row holding one of them is data.
@@ -320,16 +322,21 @@ FIELD_LABELS = {
 }
 
 
+def _count_outside_quotes(line: str, delim: str) -> int:
+    count, quoted = 0, False
+    for ch in line:
+        if ch == '"':
+            quoted = not quoted
+        elif ch == delim and not quoted:
+            count += 1
+    return count
+
+
 def _sniff_delimiter(first_line: str) -> str:
     """The separator used most outside quotes in the first line (comma on a tie)."""
     best, best_count = ",", -1
     for delim in (",", ";", "\t", "|"):
-        count, quoted = 0, False
-        for ch in first_line:
-            if ch == '"':
-                quoted = not quoted
-            elif ch == delim and not quoted:
-                count += 1
+        count = _count_outside_quotes(first_line, delim)
         if count > best_count:
             best, best_count = delim, count
     return best
@@ -397,7 +404,10 @@ def csv_layout(text: str) -> CsvLayout:
     body_shapes = _column_shapes(rest or [first], columns)
     first_shapes = [_cell_shape(c) for c in first]
     data_cells = [i for i, s in enumerate(first_shapes) if s in _DATA_SHAPES]
-    has_header = not data_cells or not all(body_shapes[i] == first_shapes[i] for i in data_cells)
+    # Compare only columns the rows below say something about: a user column that is empty
+    # after row 1 made a data row look like a header (found by the CSV shape tests).
+    comparable = [i for i in data_cells if body_shapes[i] not in ("empty", "mixed")]
+    has_header = not comparable or not all(body_shapes[i] == first_shapes[i] for i in comparable)
 
     names = [str(n) for n in first] if has_header else []
     names += [f"column_{i + 1}" for i in range(len(names), columns)]
@@ -465,16 +475,26 @@ class GenericCsvParser(BaseParser):
     @classmethod
     def can_parse(cls, content: str, filename: str) -> bool:
         stripped = content.strip()
-        # CSV: first line has commas and does not start with a digit (nginx lines start with IP)
-        # and does not look like JSON
         if stripped.startswith(("{", "[")):
             return False
-        first = next((line for line in stripped.splitlines() if line.strip()), "")
+        lines = [line for line in stripped.splitlines()[:20] if line.strip()][:5]
+        first = lines[0] if lines else ""
         if not first or _CLF_PREFIX.match(first):
             return False  # an access log saved as .csv (its user agents contain commas)
+        delim = _sniff_delimiter(first)
+        count = _count_outside_quotes(first, delim)
+        if count < 1:
+            return False
         if filename.lower().endswith(".csv"):
-            return "," in first or ";" in first or "\t" in first
-        return "," in first and not first[0].isdigit()
+            return True
+        # Content decides, not the name. A comma header row that does not start with a digit
+        # (nginx lines start with an address) as before; any other separator, or a first row
+        # of data, needs the same count on every sampled line (at least two for data) — one
+        # stray tab or ";" in the first line of arbitrary text or binary data is not a table.
+        consistent = len(lines) >= 2 and all(_count_outside_quotes(line, delim) == count for line in lines)
+        if not first[0].isdigit():
+            return delim == "," or consistent
+        return count >= 2 and len(lines) >= 3 and consistent
 
     @classmethod
     def parse(cls, content: str, filename: str = "") -> list[LogEvent]:
