@@ -31,7 +31,7 @@ import json
 import logging
 import re
 from collections import Counter
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 
@@ -387,6 +387,22 @@ class CsvLayout:
     names: list[str]             # the key of each column in the records built from rows
     by_value: dict[int, str]     # column index -> canonical field read from its values
     columns: int
+    shapes: list[str] = field(default_factory=list)   # what each column's values look like (_cell_shape)
+    header: list[str] = field(default_factory=list)   # the header row as written, when there is one
+
+
+def columns_read(layout: CsvLayout) -> dict[int, str]:
+    """Column index -> the canonical field the reader takes from it, by its name or by its
+    values (columns read by value carry the field's own name, which leads its candidate list).
+    The first candidate name present wins, as in _normalise_keys."""
+    normalised = [_norm_key(n) for n in layout.names]
+    out: dict[int, str] = {}
+    for field_name, candidates in _CANDIDATES.items():
+        for candidate in candidates:
+            if candidate in normalised:
+                out[normalised.index(candidate)] = field_name
+                break
+    return out
 
 
 def csv_layout(text: str) -> CsvLayout:
@@ -425,7 +441,8 @@ def csv_layout(text: str) -> CsvLayout:
                 break
     for i, field_name in by_value.items():
         names[i] = field_name
-    return CsvLayout(delimiter, has_header, names, by_value, columns)
+    return CsvLayout(delimiter, has_header, names, by_value, columns, shapes=list(shapes),
+                     header=[str(n) for n in first] if has_header else [])
 
 
 def describe_layout(layout: CsvLayout) -> str | None:
