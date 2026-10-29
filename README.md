@@ -197,7 +197,7 @@ Timestamps keep the offset the source gives. Formats without one (Microsoft 365 
 | Cisco ASA / FTD | Firewall | `cisco_asa` | Connection and threat events from Cisco ASA and Firepower Threat Defense appliances. |
 | FortiGate | Firewall | `fortigate` | Fortinet FortiGate UTM/NGFW traffic and security event logs. |
 | Juniper SRX | Firewall | `juniper_srx` | Session creation, close, and deny events from Juniper SRX and ScreenOS firewalls. |
-| PAN-OS Native CSV | Firewall | `panos` | Palo Alto Networks native traffic, threat, and URL filtering logs. |
+| [PAN-OS Native CSV](https://logtriage.app/reference/log-formats/panos/) | Firewall | `panos` | Palo Alto Networks native traffic, threat, and URL filtering logs. |
 | Generic CSV | Generic | `generic_csv` | Any comma-separated access or application log with recognizable column headers. |
 | Generic JSON / NDJSON | Generic | `generic_json` | Any structured JSON or newline-delimited JSON application log. |
 | Wazuh | HIDS | `wazuh` | Host-based intrusion detection alerts from the Wazuh agent platform. |
@@ -212,13 +212,13 @@ Timestamps keep the offset the source gives. Formats without one (Microsoft 365 
 | Syslog (RFC 5424 / 3164) | Network | `syslog` | The universal network device and application logging standard. |
 | Traefik | Network | `traefik` | Structured access logs from the Traefik reverse proxy. |
 | Cloudflare Logs | Network & CDN | `cloudflare` | Edge HTTP requests, WAF actions, and firewall rule matches at the Cloudflare edge. |
-| CEF (Common Event Format) | Network & Firewall | `cef` | Vendor-neutral event format used by Palo Alto, Check Point, ArcSight, and most enterprise firewalls/SIEMs. |
+| [CEF (Common Event Format)](https://logtriage.app/reference/log-formats/cef/) | Network & Firewall | `cef` | Vendor-neutral event format used by Palo Alto, Check Point, ArcSight, and most enterprise firewalls/SIEMs. |
 | GitHub Audit Log | SaaS | `github_audit` | Organization, repository, and security event history from GitHub. |
 | Google Workspace | SaaS | `google_workspace` | Admin console and application activity from Google Workspace. |
 | Microsoft 365 Unified Audit Log | SaaS | `m365_audit` | Cross-workload audit trail spanning Exchange, SharePoint, Teams, and Entra ID. |
 | Slack Audit Log | SaaS | `slack_audit` | Workspace administration and access events from Slack's Enterprise Audit Log. |
 | Elastic Common Schema | SIEM | `ecs` | Normalized event schema used by Filebeat, Auditbeat, and Winlogbeat in the Elastic Stack. |
-| IBM LEEF | SIEM | `leef` | Log Event Extended Format used for QRadar integrations. |
+| [IBM LEEF](https://logtriage.app/reference/log-formats/leef/) | SIEM | `leef` | Log Event Extended Format used for QRadar integrations. |
 | [AWS WAF](https://logtriage.app/reference/log-formats/aws-waf/) | WAF | `aws_waf` | Web ACL allow/block decisions from AWS WAF. |
 | F5 BIG-IP ASM | WAF | `f5_asm` | Application-layer attack detections from F5's web application firewall module. |
 | IIS W3C Extended | Web | `iis` | Microsoft Internet Information Services extended logging format. |
