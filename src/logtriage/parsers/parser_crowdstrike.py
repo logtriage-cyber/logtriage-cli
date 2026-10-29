@@ -11,16 +11,31 @@ Common event types handled:
   ProcessRollup2 / SyntheticProcessRollup2 — process execution
   NetworkConnectIP4 / NetworkReceiveAcceptIP4 — network connections
   DnsRequest — DNS lookups
-  UserLogon / UserLogoff — authentication events
-  SuspiciousActivity / DetectionSummaryEvent — alert/detection
+  UserLogon / UserLogoff / UserLogonFailed2 — authentication events
+  Detections — streaming-API events, which carry no event_simpleName: in LogScale/FLTR data
+    a flat record with ExternalApiType=Event_DetectionSummaryEvent (CrowdStrike's own queries:
+    "These events don't have an #event_simpleName tag"), AgentIdString and CustomerIdString;
+    from the Event Streams API an envelope {"metadata": {"eventType": "DetectionSummaryEvent"},
+    "event": {...}}. Fields per Panther's DetectionSummary schema (from CrowdStrike's streaming
+    API documentation).
+
+Event names and fields follow marketing/src/data/reference/crowdstrike-events-official.json:
+CrowdStrike's own public queries (github.com/CrowdStrike/logscale-community-content), Panther's
+FDR schemas and Splunk's ProcessRollup2 data source. A 2026-10-28 check against them removed
+event names nobody documents (SuspiciousActivity, MalwareDetected, ProcessBlockedEvent,
+NetworkContainmentStateChanged, ServiceInstallationDetected, CriticalFileAccessed); on
+2026-10-29 the sample's detection, written with an event_simpleName no source uses, became the
+documented ExternalApiType record.
 
 References:
   https://falcon.crowdstrike.com/documentation/93/falcon-data-replicator
+  https://docs.panther.com/data-onboarding/supported-logs/crowdstrike/falcon-data-replicator
 """
 from __future__ import annotations
 
 import logging
 from datetime import datetime, timezone
+from typing import Any
 
 from logtriage.parsers import json_input
 from logtriage.parsers.base_parser import BaseParser
@@ -28,22 +43,21 @@ from logtriage.models import LogEvent, LogFormat
 
 logger = logging.getLogger(__name__)
 
-# event_simpleName values that indicate malicious / suspicious activity
+# Detection event types: the Event Streams API's eventType, and the ExternalApiType values
+# CrowdStrike's own queries filter on in LogScale data.
 _HIGH_RISK_EVENTS = frozenset({
-    "SuspiciousActivity",
-    "DetectionSummaryEvent",
-    "CriticalFileAccessed",
-    "MalwareDetected",
-    "ProcessBlockedEvent",
-    "NetworkContainmentStateChanged",
+    "DetectionSummaryEvent",            # Event Streams API metadata.eventType
+    "Event_DetectionSummaryEvent",      # ExternalApiType, as CrowdStrike's own queries name them
+    "Event_EppDetectionSummaryEvent",
+    "Event_IdpDetectionSummaryEvent",
 })
 
 # API responses wrap records as {"resources": [...]}
 _ENVELOPES = ("resources", "events", "data")
 
 _AUTH_FAIL_EVENTS = frozenset({
+    "UserLogonFailed",
     "UserLogonFailed2",
-    "ServiceInstallationDetected",
 })
 
 
@@ -60,7 +74,7 @@ def _parse_ts(raw: str | int | float | None) -> datetime:
         return datetime.now(timezone.utc)
 
 
-def _status_from_event(event_name: str, obj: dict) -> int:
+def _status_from_event(event_name: str, obj: dict[str, Any]) -> int:
     if event_name in _HIGH_RISK_EVENTS:
         return 403
     if event_name in _AUTH_FAIL_EVENTS:
@@ -73,19 +87,30 @@ def _status_from_event(event_name: str, obj: dict) -> int:
     return 200
 
 
-def _obj_to_log(obj: dict) -> LogEvent | None:
-    event_name = obj.get("event_simpleName") or obj.get("EventSimpleName", "")
+def _unwrap(obj: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+    """(event type, the record's fields): sensor events name themselves in event_simpleName,
+    streaming-API events in ExternalApiType (LogScale) or metadata.eventType (Event Streams)."""
+    meta, body = obj.get("metadata"), obj.get("event")
+    if isinstance(meta, dict) and isinstance(body, dict) and meta.get("eventType"):
+        return str(meta["eventType"]), {**body, "timestamp": body.get("timestamp") or meta.get("eventCreationTime")}
+    name = obj.get("event_simpleName") or obj.get("EventSimpleName") or obj.get("ExternalApiType") or ""
+    return str(name), obj
+
+
+def _obj_to_log(raw: dict[str, Any]) -> LogEvent | None:
+    event_name, obj = _unwrap(raw)
     if not event_name:
         return None
 
     ts = _parse_ts(
-        obj.get("timestamp") or obj.get("ContextTimeStamp") or obj.get("ProcessStartTime")
+        obj.get("timestamp") or obj.get("UTCTimestamp") or obj.get("ContextTimeStamp") or obj.get("ProcessStartTime")
     )
 
     # IP address: prefer remote IP for network events, else agent IP
     ip = (
         obj.get("RemoteAddressIP4")
         or obj.get("LocalAddressIP4")
+        or obj.get("LocalIP")  # detections: the host's address
         or obj.get("aip")  # agent IP
         or obj.get("SourceIpAddress")
     )
@@ -94,8 +119,7 @@ def _obj_to_log(obj: dict) -> LogEvent | None:
         obj.get("UserName")
         or obj.get("SubjectUserName")
         or obj.get("TargetUserName")
-        or obj.get("DetectName")  # detection name as fallback identifier
-    )
+    )  # never DetectName: a detection's name ("Cobalt Strike Beacon") is not a user
 
     # Path: use ImageFileName for process events, query for DNS, URL for web
     path = (
@@ -109,7 +133,8 @@ def _obj_to_log(obj: dict) -> LogEvent | None:
         path = str(path)
 
     # Hash: SHA256 preferred, then MD5
-    file_hash = obj.get("SHA256HashData") or obj.get("MD5HashData")
+    # Sensor events carry *HashData; detections (DetectionSummaryEvent) carry *String.
+    file_hash = obj.get("SHA256HashData") or obj.get("SHA256String") or obj.get("MD5HashData") or obj.get("MD5String")
     if file_hash and len(file_hash) not in (32, 64):
         file_hash = None
 
@@ -144,12 +169,15 @@ def parse_crowdstrike(raw_text: str) -> list[LogEvent]:
     return events
 
 
-def _is_crowdstrike(obj: dict) -> bool:
-    return bool(
-        obj.get("event_simpleName") or obj.get("EventSimpleName")
-    ) and bool(
-        obj.get("cid") or obj.get("aid") or obj.get("ComputerName")
-    )
+def _is_crowdstrike(obj: dict[str, Any]) -> bool:
+    if obj.get("event_simpleName") or obj.get("EventSimpleName"):
+        return bool(obj.get("cid") or obj.get("aid") or obj.get("ComputerName"))
+    # Streaming-API records: LogScale's flat form, or the Event Streams envelope
+    if str(obj.get("ExternalApiType", "")).startswith("Event_"):
+        return bool(obj.get("AgentIdString") or obj.get("CustomerIdString"))
+    meta, body = obj.get("metadata"), obj.get("event")
+    return (isinstance(meta, dict) and isinstance(body, dict) and bool(meta.get("eventType"))
+            and bool(meta.get("customerIDString") or "offset" in meta))
 
 
 class CrowdStrikeParser(BaseParser):
