@@ -114,6 +114,7 @@ def _build_registry() -> list[type[BaseParser]]:
     from logtriage.parsers.parser_traefik import TraefikParser
     from logtriage.parsers.parser_iis import IisParser
     from logtriage.parsers.parser_auditd import AuditdParser
+    from logtriage.parsers.parser_web_error import ApacheErrorParser, NginxErrorParser
     from logtriage.parsers.parser_syslog import SyslogParser
     from logtriage.parsers.parser_authlog import AuthLogParser
     from logtriage.parsers.parser_zeek import ZeekParser
@@ -167,6 +168,9 @@ def _build_registry() -> list[type[BaseParser]]:
         TraefikParser,
         IisParser,
         AuditdParser,
+        # Web server error logs: their lines start with "[" (Apache), so before the JSON readers' fallbacks
+        ApacheErrorParser,
+        NginxErrorParser,
         SyslogParser,
         AuthLogParser,
         ZeekParser,

@@ -22,6 +22,7 @@ class Format(NamedTuple):
 
 
 FORMATS: tuple[Format, ...] = (
+    Format("apache_error", "apache-error", "Apache HTTP Server error log", "Web"),
     Format("auditd", "auditd", "Linux audit log (auditd)", "Endpoint"),
     Format("auth_log", "auth-log", "Linux auth.log / secure", "Endpoint"),
     Format("aws_alb", "aws-alb", "AWS ALB / ELB", "Cloud"),
@@ -60,6 +61,7 @@ FORMATS: tuple[Format, ...] = (
     Format("mdatp", "mdatp", "Microsoft Defender for Endpoint", "EDR"),
     Format("mysql", "mysql", "MySQL", "Database"),
     Format("nginx", "nginx", "nginx / Apache Combined", "Web"),
+    Format("nginx_error", "nginx-error", "nginx error log", "Web"),
     Format("okta", "okta", "Okta System Log", "Identity"),
     Format("panos", "panos", "PAN-OS Native CSV", "Firewall"),
     Format("postgresql", "postgresql", "PostgreSQL", "Database"),

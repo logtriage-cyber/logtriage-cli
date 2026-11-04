@@ -65,6 +65,9 @@ class LogFormat(str, Enum):
     POSTGRESQL = "postgresql"
     # P49.9
     AUDITD = "auditd"
+    # 2026-11-04: web server error logs (parser_web_error.py)
+    APACHE_ERROR = "apache_error"
+    NGINX_ERROR = "nginx_error"
 
 
 class DeviceDetail(BaseModel):

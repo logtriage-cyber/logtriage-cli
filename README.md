@@ -1,6 +1,6 @@
 # LogTriage CLI
 
-`logtriage` reads security logs on your own machine. It recognises 51 log formats (AWS CloudTrail, Entra ID / Azure AD sign-ins, Windows Security events, Sysmon, Okta, nginx/Apache, firewalls, EDR exports and more), converts every record to one normalised schema, and gives you a quick triage summary in the terminal or the events as JSON, NDJSON or CSV.
+`logtriage` reads security logs on your own machine. It recognises 53 log formats (AWS CloudTrail, Entra ID / Azure AD sign-ins, Windows Security events, Sysmon, Okta, nginx/Apache, firewalls, EDR exports and more), converts every record to one normalised schema, and gives you a quick triage summary in the terminal or the events as JSON, NDJSON or CSV.
 
 The parsers are the ones the hosted [LogTriage](https://logtriage.app) service runs, synced into this repository.
 
@@ -116,7 +116,7 @@ logtriage parse signins.json --output csv > signins.csv
 
 ```console
 $ logtriage formats
-50 supported formats. Detection is automatic; --format ID forces a parser.
+53 supported formats. Detection is automatic; --format ID forces a parser.
 
 ID                FORMAT                           CATEGORY
 aws_alb           AWS ALB / ELB                    Cloud
@@ -168,7 +168,7 @@ Timestamps keep the offset the source gives. Formats without one (Microsoft 365 
 ## Supported formats
 
 <!-- formats-table:start -->
-51 formats, detected automatically. Linked names have a field-by-field reference page on logtriage.app.
+53 formats, detected automatically. Linked names have a field-by-field reference page on logtriage.app.
 
 | Format | Category | `--format` id | What it is |
 |---|---|---|---|
@@ -221,8 +221,10 @@ Timestamps keep the offset the source gives. Formats without one (Microsoft 365 
 | [IBM LEEF](https://logtriage.app/reference/log-formats/leef/) | SIEM | `leef` | Log Event Extended Format used for QRadar integrations. |
 | [AWS WAF](https://logtriage.app/reference/log-formats/aws-waf/) | WAF | `aws_waf` | Web ACL allow/block decisions from AWS WAF. |
 | F5 BIG-IP ASM | WAF | `f5_asm` | Application-layer attack detections from F5's web application firewall module. |
+| Apache HTTP Server error log | Web | `apache_error` | Apache 2.2 and 2.4 error_log: denied and missing paths, basic-auth failures, PHP errors, ModSecurity blocks and server notices, with the client address and referer. |
 | IIS W3C Extended | Web | `iis` | Microsoft Internet Information Services extended logging format. |
 | nginx / Apache Combined | Web | `nginx` | The standard combined access log format used by nginx and Apache. |
+| nginx error log | Web | `nginx_error` | nginx error.log: missing and forbidden files, basic-auth failures, rate limiting and upstream errors, with the client, request and host of each. |
 <!-- formats-table:end -->
 
 ## Hosted analysis: `logtriage analyze`
