@@ -34,8 +34,11 @@ jobs:
           set -euo pipefail
           name="$(jq -r .name server.json)"
           version="$(jq -r .version server.json)"
-          published="$(curl -fsS "https://registry.modelcontextprotocol.io/v0/servers?search=${name}" \
-            | jq -r --arg n "$name" '[.servers[] | (.server // .) | select(.name == $n) | .version] | join(" ")')"
+          # The versions of this exact name (the search parameter does not match a full name);
+          # 404 until the first publish.
+          encoded="$(jq -rn --arg n "$name" '$n|@uri')"
+          published="$( (curl -fsS "https://registry.modelcontextprotocol.io/v0.1/servers/${encoded}/versions" || echo '{"servers":[]}') \
+            | jq -r '[.servers[] | (.server // .) | .version] | join(" ")')"
           if printf '%s\n' $published | grep -qx "$version"; then
             echo "::notice::${name} ${version} is already in the registry; nothing to publish."
             echo "publish=false" >> "$GITHUB_OUTPUT"
