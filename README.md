@@ -271,6 +271,7 @@ compromised: rotate its keys and review what it ran after 02:14 UTC.
 
 - [Log format reference](https://logtriage.app/reference/log-formats/): field-by-field guides to the formats above.
 - [Free in-browser log analyzer](https://logtriage.app/tools/log-analyzer/).
+- [MCP server](https://logtriage.app/tools/mcp-server/) for AI agents (`https://api.logtriage.app/mcp`): error-code lookups, a log-record explainer, IP blocklist checks and attack scans, free and without a key; `server.json` here lists it in the MCP Registry.
 - [LogTriage detection rules](https://github.com/logtriage-cyber/logtriage-detection-rules): Sigma rules validated against the same sample logs.
 - [LogTriage](https://logtriage.app): the hosted service behind `analyze`.
 

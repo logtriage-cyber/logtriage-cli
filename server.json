@@ -1,0 +1,22 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.logtriage-cyber/logtriage",
+  "title": "LogTriage",
+  "description": "Security log tools: Windows/Entra error codes, log explainer, IP blocklists, attack scans",
+  "version": "1.0.0",
+  "websiteUrl": "https://logtriage.app/tools/mcp-server/",
+  "remotes": [
+    {
+      "type": "streamable-http",
+      "url": "https://api.logtriage.app/mcp",
+      "headers": [
+        {
+          "name": "Authorization",
+          "description": "Optional. 'Bearer ltk_...' LogTriage API key for analyze_log_file and get_analysis; the other tools need none.",
+          "isRequired": false,
+          "isSecret": true
+        }
+      ]
+    }
+  ]
+}
