@@ -209,7 +209,7 @@ Timestamps keep the offset the source gives. Formats without one (Microsoft 365 
 | [Suricata](https://logtriage.app/reference/log-formats/suricata/) | IDS/IPS | `suricata` | EVE JSON alert, flow, and protocol logs from the Suricata network IDS/IPS. |
 | [Zeek](https://logtriage.app/reference/log-formats/zeek/) | IDS/IPS | `zeek` | Network connection and protocol logs from the Zeek (Bro) network monitor. |
 | HAProxy | Network | `haproxy` | HTTP and TCP access logs from the HAProxy load balancer. |
-| Syslog (RFC 5424 / 3164) | Network | `syslog` | The universal network device and application logging standard. |
+| [Syslog (RFC 5424 / 3164)](https://logtriage.app/reference/log-formats/syslog/) | Network | `syslog` | The universal network device and application logging standard. |
 | Traefik | Network | `traefik` | Structured access logs from the Traefik reverse proxy. |
 | Cloudflare Logs | Network & CDN | `cloudflare` | Edge HTTP requests, WAF actions, and firewall rule matches at the Cloudflare edge. |
 | [CEF (Common Event Format)](https://logtriage.app/reference/log-formats/cef/) | Network & Firewall | `cef` | Vendor-neutral event format used by Palo Alto, Check Point, ArcSight, and most enterprise firewalls/SIEMs. |
