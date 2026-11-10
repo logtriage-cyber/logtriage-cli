@@ -176,8 +176,8 @@ Timestamps keep the offset the source gives. Formats without one (Microsoft 365 
 | [AWS CloudTrail](https://logtriage.app/reference/log-formats/cloudtrail/) | Cloud | `cloudtrail` | AWS API call history — every console, SDK, and CLI action against your account. |
 | AWS Config | Cloud | `aws_config` | Configuration change history for AWS resources. |
 | AWS S3 Server Access Logs | Cloud | `aws_s3_access` | Request-level access logs for Amazon S3 buckets. |
-| Azure ARM Activity Log | Cloud | `azure_activity` | Subscription-level control-plane operations across Azure Resource Manager. |
-| GCP Cloud Audit Log | Cloud | `gcp_audit` | Admin activity and data access events across Google Cloud Platform services. |
+| [Azure ARM Activity Log](https://logtriage.app/reference/log-formats/azure-activity/) | Cloud | `azure_activity` | Subscription-level control-plane operations across Azure Resource Manager. |
+| [GCP Cloud Audit Log](https://logtriage.app/reference/log-formats/gcp-audit/) | Cloud | `gcp_audit` | Admin activity and data access events across Google Cloud Platform services. |
 | [AWS VPC Flow Logs](https://logtriage.app/reference/log-formats/vpc-flow/) | Cloud Network | `vpc_flow` | IP traffic metadata for every accepted and rejected connection in an AWS VPC. |
 | Azure NSG Flow Logs | Cloud Network | `azure_nsg` | Allow/deny decisions for traffic through Azure Network Security Groups. |
 | AWS GuardDuty | Cloud Security | `guardduty` | Managed threat detection findings from AWS GuardDuty. |
@@ -188,14 +188,14 @@ Timestamps keep the offset the source gives. Formats without one (Microsoft 365 
 | PostgreSQL | Database | `postgresql` | CSV-format error and connection logs from PostgreSQL. |
 | Carbon Black | EDR | `carbonblack` | Endpoint event and detection data from Carbon Black EDR and Cloud. |
 | [CrowdStrike Falcon](https://logtriage.app/reference/log-formats/crowdstrike/) | EDR | `crowdstrike` | Process, network, and detection telemetry from the CrowdStrike Falcon Data Replicator. |
-| Microsoft Defender for Endpoint | EDR | `mdatp` | Alerts and advanced hunting events from Microsoft Defender ATP. |
+| [Microsoft Defender for Endpoint](https://logtriage.app/reference/log-formats/mdatp/) | EDR | `mdatp` | Alerts and advanced hunting events from Microsoft Defender ATP. |
 | SentinelOne | EDR | `sentinelone` | Threat detections and agent telemetry from the SentinelOne endpoint platform. |
-| Linux audit log (auditd) | Endpoint | `auditd` | Linux Audit records from /var/log/audit/audit.log: login attempts and outcomes, executed commands, account and group changes, audit rule changes. |
+| [Linux audit log (auditd)](https://logtriage.app/reference/log-formats/auditd/) | Endpoint | `auditd` | Linux Audit records from /var/log/audit/audit.log: login attempts and outcomes, executed commands, account and group changes, audit rule changes. |
 | Linux auth.log / secure | Endpoint | `auth_log` | SSH, sudo, and PAM authentication events from Linux hosts. |
 | [Sysmon](https://logtriage.app/reference/log-formats/sysmon/) | Endpoint | `sysmon` | Deep Windows process, network, and file-system telemetry from Microsoft Sysinternals Sysmon. |
 | [Windows Event Log](https://logtriage.app/reference/log-formats/evtx/) | Endpoint | `evtx` | Native Windows Event Log XML and binary .evtx exports. |
-| Cisco ASA / FTD | Firewall | `cisco_asa` | Connection and threat events from Cisco ASA and Firepower Threat Defense appliances. |
-| FortiGate | Firewall | `fortigate` | Fortinet FortiGate UTM/NGFW traffic and security event logs. |
+| [Cisco ASA / FTD](https://logtriage.app/reference/log-formats/cisco-asa/) | Firewall | `cisco_asa` | Connection and threat events from Cisco ASA and Firepower Threat Defense appliances. |
+| [FortiGate](https://logtriage.app/reference/log-formats/fortigate/) | Firewall | `fortigate` | Fortinet FortiGate UTM/NGFW traffic and security event logs. |
 | Juniper SRX | Firewall | `juniper_srx` | Session creation, close, and deny events from Juniper SRX and ScreenOS firewalls. |
 | [PAN-OS Native CSV](https://logtriage.app/reference/log-formats/panos/) | Firewall | `panos` | Palo Alto Networks native traffic, threat, and URL filtering logs. |
 | Generic CSV | Generic | `generic_csv` | Any comma-separated access or application log with recognizable column headers. |
@@ -215,14 +215,14 @@ Timestamps keep the offset the source gives. Formats without one (Microsoft 365 
 | [CEF (Common Event Format)](https://logtriage.app/reference/log-formats/cef/) | Network & Firewall | `cef` | Vendor-neutral event format used by Palo Alto, Check Point, ArcSight, and most enterprise firewalls/SIEMs. |
 | GitHub Audit Log | SaaS | `github_audit` | Organization, repository, and security event history from GitHub. |
 | Google Workspace | SaaS | `google_workspace` | Admin console and application activity from Google Workspace. |
-| Microsoft 365 Unified Audit Log | SaaS | `m365_audit` | Cross-workload audit trail spanning Exchange, SharePoint, Teams, and Entra ID. |
+| [Microsoft 365 Unified Audit Log](https://logtriage.app/reference/log-formats/m365/) | SaaS | `m365_audit` | Cross-workload audit trail spanning Exchange, SharePoint, Teams, and Entra ID. |
 | Slack Audit Log | SaaS | `slack_audit` | Workspace administration and access events from Slack's Enterprise Audit Log. |
 | Elastic Common Schema | SIEM | `ecs` | Normalized event schema used by Filebeat, Auditbeat, and Winlogbeat in the Elastic Stack. |
 | [IBM LEEF](https://logtriage.app/reference/log-formats/leef/) | SIEM | `leef` | Log Event Extended Format used for QRadar integrations. |
 | [AWS WAF](https://logtriage.app/reference/log-formats/aws-waf/) | WAF | `aws_waf` | Web ACL allow/block decisions from AWS WAF. |
 | F5 BIG-IP ASM | WAF | `f5_asm` | Application-layer attack detections from F5's web application firewall module. |
 | Apache HTTP Server error log | Web | `apache_error` | Apache 2.2 and 2.4 error_log: denied and missing paths, basic-auth failures, PHP errors, ModSecurity blocks and server notices, with the client address and referer. |
-| IIS W3C Extended | Web | `iis` | Microsoft Internet Information Services extended logging format. |
+| [IIS W3C Extended](https://logtriage.app/reference/log-formats/iis/) | Web | `iis` | Microsoft Internet Information Services extended logging format. |
 | nginx / Apache Combined | Web | `nginx` | The standard combined access log format used by nginx and Apache. |
 | nginx error log | Web | `nginx_error` | nginx error.log: missing and forbidden files, basic-auth failures, rate limiting and upstream errors, with the client, request and host of each. |
 <!-- formats-table:end -->
