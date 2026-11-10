@@ -12,13 +12,16 @@ mdm / systems), event_type (or type), initiated_by (object with sub-fields),
 and timestamp (ISO-8601). JumpCloud also embeds geoip data in the event.
 
 Risk mapping:
-  event_type admin_login_attempt_failed / password_recovery → 403
-  sso / mfa failures → 403
-  admin events (service=directory, type=admin_*) → 401
+  success=false (admin_login_attempt, user_login_attempt, sso_auth, radius_auth…) and lockouts → 403
+  deletions, admin grants, MFA removal, command runs → 403
+  other admin events → 401
   success events → 200
 
+The client address is client_ip; the account of a login is resource.email / username.
+
 Reference:
-  https://docs.jumpcloud.com/api/insights/directory/v1/overview
+  https://docs.jumpcloud.com/api/insights/directory/1.0/index.html
+  https://docs.jumpcloud.com/new/api/insights/directory/index.yaml (field tables and event types)
 """
 from __future__ import annotations
 
@@ -38,18 +41,15 @@ _JUMPCLOUD_SERVICES = frozenset({
     "password_manager", "saml", "jumpcloud_protect",
 })
 
-_FAIL_TYPES = frozenset({
-    "admin_login_attempt_failed", "login_attempt_failed",
-    "password_recovery_attempt", "mfa_failed",
-    "user_locked_out", "sso_auth_failure", "radius_auth_failure",
-    "ldap_bind_failed", "system_auth_failure",
-})
+# Event types from the Directory Insights API reference (docs.jumpcloud.com, insights/directory). A failed
+# login is the same event type as a successful one with success=false (admin_login_attempt, sso_auth…).
+_FAIL_TYPES = frozenset({"user_lockout", "admin_lockout"})
 
 _HIGH_ADMIN_TYPES = frozenset({
-    "admin_created", "admin_deleted", "admin_password_reset",
-    "user_deleted", "user_suspended", "mfa_exclusion_added",
-    "policy_created", "policy_updated", "policy_deleted",
-    "system_deleted", "application_deleted",
+    "admin_create", "admin_delete", "admin_totp_disable", "totp_delete_enrollment",
+    "user_delete", "user_suspended", "user_admin_granted", "user_group_admin_grant",
+    "policy_delete", "authnpolicy_delete", "authpolicy_update", "iplist_delete",
+    "command_create", "command_run",
 })
 
 
@@ -81,17 +81,23 @@ def _event_to_log(obj: dict[str, Any]) -> LogEvent | None:
         success = obj.get("success")
 
         # actor identity
+        # Login events name the account in resource (admin_login_attempt) or username (radius, ldap).
+        raw_resource = obj.get("resource")
+        resource: dict[str, Any] = raw_resource if isinstance(raw_resource, dict) else {}
         username = None
         if isinstance(initiated_by, dict):
             username = (
                 initiated_by.get("email")
                 or initiated_by.get("username")
-                or initiated_by.get("id")
             )
+        username = username or obj.get("username") or resource.get("email") or resource.get("username")
+        if not username and isinstance(initiated_by, dict):
+            username = initiated_by.get("id")
 
-        # geoip
+        ip = obj.get("client_ip")
+        if not ip and isinstance(obj.get("connection"), dict):
+            ip = obj["connection"].get("ip")
         geoip = obj.get("geoip", {})
-        ip = obj.get("connection", {}).get("ip") if isinstance(obj.get("connection"), dict) else None
         if not ip and isinstance(geoip, dict):
             ip = geoip.get("ip")
 

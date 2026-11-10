@@ -32,21 +32,21 @@ from logtriage.models import LogEvent, LogFormat
 
 logger = logging.getLogger(__name__)
 
+# Action names from Slack's Audit Logs API actions reference
+# (docs.slack.dev/reference/audit-logs-api/methods-actions-reference).
 _HIGH_RISK_ACTIONS = frozenset({
-    "user_deactivated", "member_deactivated", "guest_deactivated",
-    "ekm_enrolled", "ekm_disenrolled", "ekm_key_revoked",
-    "file_downloaded", "message_filed_away", "app_uninstalled",
-    "app_scopes_expanded", "workspace_export_started",
-    "owner_transferred", "workspace_deleted",
+    "user_deactivated", "ekm_unenrolled", "manual_export_started", "corporate_exports_enabled",
+    "pref.sso_setting_changed", "pref.two_factor_auth_changed", "anomaly",
+    "app_scopes_expanded", "owner_transferred", "workspace_deleted",
     "role_change_to_admin", "role_change_to_owner",
-    "bulk_session_invalidation_by_admin",
+    "user_session_reset_by_admin",
 })
 
 _MED_RISK_ACTIONS = frozenset({
-    "user_login", "user_logout", "file_public_link_created",
-    "message_shared_externally", "app_installed", "app_requested",
-    "channel_joined", "channel_created", "channel_deleted",
-    "member_left_workspace", "guest_created",
+    "user_login", "user_login_failed", "user_logout", "file_downloaded", "file_public_link_created",
+    "app_installed", "app_approved", "scheduled_export_started",
+    "public_channel_created", "private_channel_created", "channel_deleted",
+    "guest_created",
 })
 
 
