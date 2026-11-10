@@ -174,19 +174,19 @@ Timestamps keep the offset the source gives. Formats without one (Microsoft 365 
 |---|---|---|---|
 | [AWS ALB / ELB](https://logtriage.app/reference/log-formats/aws-alb/) | Cloud | `aws_alb` | Access logs from AWS Application and Elastic Load Balancers. |
 | [AWS CloudTrail](https://logtriage.app/reference/log-formats/cloudtrail/) | Cloud | `cloudtrail` | AWS API call history — every console, SDK, and CLI action against your account. |
-| AWS Config | Cloud | `aws_config` | Configuration change history for AWS resources. |
-| AWS S3 Server Access Logs | Cloud | `aws_s3_access` | Request-level access logs for Amazon S3 buckets. |
+| [AWS Config](https://logtriage.app/reference/log-formats/aws-config/) | Cloud | `aws_config` | Configuration change history for AWS resources. |
+| [AWS S3 Server Access Logs](https://logtriage.app/reference/log-formats/aws-s3-access/) | Cloud | `aws_s3_access` | Request-level access logs for Amazon S3 buckets. |
 | [Azure ARM Activity Log](https://logtriage.app/reference/log-formats/azure-activity/) | Cloud | `azure_activity` | Subscription-level control-plane operations across Azure Resource Manager. |
 | [GCP Cloud Audit Log](https://logtriage.app/reference/log-formats/gcp-audit/) | Cloud | `gcp_audit` | Admin activity and data access events across Google Cloud Platform services. |
 | [AWS VPC Flow Logs](https://logtriage.app/reference/log-formats/vpc-flow/) | Cloud Network | `vpc_flow` | IP traffic metadata for every accepted and rejected connection in an AWS VPC. |
 | [Azure NSG Flow Logs](https://logtriage.app/reference/log-formats/azure-nsg/) | Cloud Network | `azure_nsg` | Allow/deny decisions for traffic through Azure Network Security Groups. |
 | [AWS GuardDuty](https://logtriage.app/reference/log-formats/guardduty/) | Cloud Security | `guardduty` | Managed threat detection findings from AWS GuardDuty. |
 | AWS Inspector v2 | Cloud Security | `aws_inspector` | Vulnerability and package findings from AWS Inspector. |
-| AWS Security Hub | Cloud Security | `aws_securityhub` | Aggregated security findings (ASFF) from across AWS security services. |
+| [AWS Security Hub](https://logtriage.app/reference/log-formats/aws-securityhub/) | Cloud Security | `aws_securityhub` | Aggregated security findings (ASFF) from across AWS security services. |
 | [Kubernetes Audit Log](https://logtriage.app/reference/log-formats/k8s-audit/) | Cloud-Native | `k8s_audit` | Every request made to the Kubernetes API server, including who did what to which resource. |
 | MySQL | Database | `mysql` | Slow query and error logs from MySQL/MariaDB. |
 | PostgreSQL | Database | `postgresql` | CSV-format error and connection logs from PostgreSQL. |
-| Carbon Black | EDR | `carbonblack` | Endpoint event and detection data from Carbon Black EDR and Cloud. |
+| [Carbon Black](https://logtriage.app/reference/log-formats/carbonblack/) | EDR | `carbonblack` | Endpoint event and detection data from Carbon Black EDR and Cloud. |
 | [CrowdStrike Falcon](https://logtriage.app/reference/log-formats/crowdstrike/) | EDR | `crowdstrike` | Process, network, and detection telemetry from the CrowdStrike Falcon Data Replicator. |
 | [Microsoft Defender for Endpoint](https://logtriage.app/reference/log-formats/mdatp/) | EDR | `mdatp` | Alerts and advanced hunting events from Microsoft Defender ATP. |
 | SentinelOne | EDR | `sentinelone` | Threat detections and agent telemetry from the SentinelOne endpoint platform. |
@@ -213,11 +213,11 @@ Timestamps keep the offset the source gives. Formats without one (Microsoft 365 
 | Traefik | Network | `traefik` | Structured access logs from the Traefik reverse proxy. |
 | [Cloudflare Logs](https://logtriage.app/reference/log-formats/cloudflare/) | Network & CDN | `cloudflare` | Edge HTTP requests, WAF actions, and firewall rule matches at the Cloudflare edge. |
 | [CEF (Common Event Format)](https://logtriage.app/reference/log-formats/cef/) | Network & Firewall | `cef` | Vendor-neutral event format used by Palo Alto, Check Point, ArcSight, and most enterprise firewalls/SIEMs. |
-| GitHub Audit Log | SaaS | `github_audit` | Organization, repository, and security event history from GitHub. |
-| Google Workspace | SaaS | `google_workspace` | Admin console and application activity from Google Workspace. |
+| [GitHub Audit Log](https://logtriage.app/reference/log-formats/github-audit/) | SaaS | `github_audit` | Organization, repository, and security event history from GitHub. |
+| [Google Workspace](https://logtriage.app/reference/log-formats/google-workspace/) | SaaS | `google_workspace` | Admin console and application activity from Google Workspace. |
 | [Microsoft 365 Unified Audit Log](https://logtriage.app/reference/log-formats/m365/) | SaaS | `m365_audit` | Cross-workload audit trail spanning Exchange, SharePoint, Teams, and Entra ID. |
 | Slack Audit Log | SaaS | `slack_audit` | Workspace administration and access events from Slack's Enterprise Audit Log. |
-| Elastic Common Schema | SIEM | `ecs` | Normalized event schema used by Filebeat, Auditbeat, and Winlogbeat in the Elastic Stack. |
+| [Elastic Common Schema](https://logtriage.app/reference/log-formats/ecs/) | SIEM | `ecs` | Normalized event schema used by Filebeat, Auditbeat, and Winlogbeat in the Elastic Stack. |
 | [IBM LEEF](https://logtriage.app/reference/log-formats/leef/) | SIEM | `leef` | Log Event Extended Format used for QRadar integrations. |
 | [AWS WAF](https://logtriage.app/reference/log-formats/aws-waf/) | WAF | `aws_waf` | Web ACL allow/block decisions from AWS WAF. |
 | F5 BIG-IP ASM | WAF | `f5_asm` | Application-layer attack detections from F5's web application firewall module. |

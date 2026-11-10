@@ -33,6 +33,8 @@ _WATCHLIST_PREFIX = "watchlist."
 # Alerts raised from watchlist hits, e.g. alert.watchlist.hit.ingress.process (cb-event-forwarder).
 # Until 2026-10-20 they fell through to the generic fallback and scored as benign (200).
 _ALERT_PREFIX = "alert."
+# Intelligence feed hits, e.g. feed.ingress.hit.process (Broadcom's event-forwarder event schema).
+_FEED_PREFIX = "feed."
 
 # EDR event types → approximate status codes
 _EDR_STATUS: dict[str, int] = {
@@ -49,9 +51,12 @@ _EDR_STATUS: dict[str, int] = {
 }
 
 
-def _parse_ts(raw: str | None) -> datetime:
+def _parse_ts(raw: str | int | float | None) -> datetime:
     if not raw:
         return datetime.now(timezone.utc)
+    # The EDR event forwarder writes ingress.event.* timestamps as seconds since the epoch.
+    if isinstance(raw, (int, float)) or str(raw).replace(".", "", 1).isdigit():
+        return datetime.fromtimestamp(float(raw), tz=timezone.utc)
     try:
         raw = raw.rstrip("Z").replace(" ", "T")
         if "+" not in raw and raw.endswith(("Z",)):
@@ -63,14 +68,18 @@ def _parse_ts(raw: str | None) -> datetime:
 
 def _edr_to_log(obj: dict) -> LogEvent | None:
     event_type = obj.get("type", "")
-    ts = _parse_ts(obj.get("timestamp") or obj.get("start_timestamp"))
-    ip = obj.get("remote_ip") or obj.get("local_ip") or obj.get("srcip")
+    ts = _parse_ts(obj.get("timestamp") or obj.get("event_timestamp") or obj.get("start_timestamp"))
+    # Feed hits name the matched indicator: an ipv4 ioc_value is the address involved.
+    feed_ip = obj.get("ioc_value") if obj.get("ioc_type") == "ipv4" else None
+    ip = obj.get("remote_ip") or feed_ip or obj.get("local_ip") or obj.get("srcip")
     user = obj.get("username") or obj.get("user") or obj.get("parent_username")
     hostname = obj.get("computer_name") or obj.get("hostname")
     path = (
         obj.get("path")
+        or obj.get("command_line")
         or obj.get("cmdline")
         or obj.get("domain")   # netconn events
+        or obj.get("feed_name")
         or obj.get("md5")
         or event_type
     )
@@ -80,7 +89,7 @@ def _edr_to_log(obj: dict) -> LogEvent | None:
         md5 if md5 and len(md5) == 32 else None
     )
 
-    status = _EDR_STATUS.get(event_type, 403 if event_type.startswith((_WATCHLIST_PREFIX, _ALERT_PREFIX)) else 200)
+    status = _EDR_STATUS.get(event_type, 403 if event_type.startswith((_WATCHLIST_PREFIX, _ALERT_PREFIX, _FEED_PREFIX)) else 200)
 
     return LogEvent(
         source_format=LogFormat.CARBONBLACK,
@@ -171,6 +180,8 @@ def _is_carbonblack(obj: dict) -> bool:
     return (
         t.startswith(_EDR_PREFIX) or
         t.startswith(_WATCHLIST_PREFIX) or
+        t.startswith(_ALERT_PREFIX) or
+        t.startswith(_FEED_PREFIX) or
         ("deviceInfo" in obj and "eventAction" in obj) or
         (obj.get("sensor_id") is not None and obj.get("computer_name") is not None)
     )
