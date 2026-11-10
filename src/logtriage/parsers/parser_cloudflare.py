@@ -22,7 +22,7 @@ Key fields mapped:
   ClientRequestPath         → path
   EdgeResponseStatus        → status_code  (or 403 if Action=block)
   Action                    → if "block"/"drop" → status_code=403, failure_reason
-  RuleMessage               → resource_display_name (WAF rule that fired)
+  Description / RuleMessage → resource_display_name (WAF rule that fired)
   ClientRequestQuery        → appended to path if present
 """
 from __future__ import annotations
@@ -56,7 +56,8 @@ def _parse_event(raw: dict[str, Any]) -> LogEvent | None:
     try:
         action: str | None = (raw.get("Action") or raw.get("action") or "").lower()
         edge_status: int | None = raw.get("EdgeResponseStatus") or raw.get("EdgeResponseCode")
-        rule_msg: str | None = raw.get("RuleMessage") or raw.get("Source")
+        # Description is the firewall_events field Cloudflare documents; RuleMessage is kept for older exports.
+        rule_msg: str | None = raw.get("Description") or raw.get("RuleMessage") or raw.get("Source")
         rule_id: str | None = raw.get("RuleID") or raw.get("RuleId")
 
         is_blocked = action in _BLOCK_ACTIONS
